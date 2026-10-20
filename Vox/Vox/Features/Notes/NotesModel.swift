@@ -25,24 +25,40 @@ final class NotesModel {
         return (try? store.children(of: parentID)) ?? []
     }
 
-    /// Every task below `id`, at any depth. Used by the board.
-    func tasks(under id: UUID) -> [Node] {
+    /// Board cards: task entries in this page and its sub-pages.
+    /// Sub-entries are not cards; they show up as progress on their parent card.
+    func boardEntries(under pageID: UUID) -> [Node] {
         _ = revision
-        return ((try? store.descendants(of: id)) ?? []).filter { $0.kind == .task }
+        var result: [Node] = []
+        var pages = [pageID]
+        while !pages.isEmpty {
+            for child in children(of: pages.removeFirst()) {
+                if child.kind == .page { pages.append(child.id) }
+                if child.isTask { result.append(child) }
+            }
+        }
+        return result
+    }
+
+    /// Done vs total for an entry's direct sub-tasks. nil when it has none.
+    func progress(of entryID: UUID) -> (done: Int, total: Int)? {
+        let tasks = children(of: entryID).filter(\.isTask)
+        guard !tasks.isEmpty else { return nil }
+        return (tasks.filter { $0.status == .done }.count, tasks.count)
     }
 
     // MARK: Writes
 
-    func setView(_ node: Node, _ view: FolderView) {
-        var changed = node
+    func setView(_ page: Node, _ view: PageView) {
+        var changed = page
         changed.view = view
         save(changed)
     }
 
-    func add(kind: NodeKind, title: String, parentID: UUID?) {
+    func add(kind: NodeKind, title: String, parentID: UUID?, status: TaskStatus? = nil) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty else { return }
-        perform { _ = try store.create(kind: kind, title: title, parentID: parentID) }
+        perform { _ = try store.create(kind: kind, title: title, parentID: parentID, status: status) }
     }
 
     func save(_ node: Node) {
@@ -57,7 +73,7 @@ final class NotesModel {
         save(changed)
     }
 
-    func setStatus(_ node: Node, _ status: TaskStatus) {
+    func setStatus(_ node: Node, _ status: TaskStatus?) {
         var changed = node
         changed.status = status
         save(changed)

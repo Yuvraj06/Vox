@@ -1,27 +1,36 @@
 #if DEBUG
 import Foundation
 
-/// Debug only. Launch with `-seedSampleData` to fill an empty store with an example project.
+/// Debug only. Launch with `-seedSampleData` to fill an empty store with examples.
 enum SampleData {
     static func seedIfRequested(_ store: any NodeStore) {
         guard ProcessInfo.processInfo.arguments.contains("-seedSampleData"),
               (try? store.children(of: nil).isEmpty) == true else { return }
         do {
-            let orbit = try store.create(kind: .folder, title: "Orbit", parentID: nil, view: .board)
-            let frontend = try store.create(kind: .folder, title: "Frontend", parentID: orbit.id)
-            let backend = try store.create(kind: .folder, title: "Backend", parentID: orbit.id)
-            let hardware = try store.create(kind: .folder, title: "Hardware", parentID: orbit.id)
-            try store.create(kind: .task, title: "Login screen", parentID: frontend.id, status: .doing)
-            try store.create(kind: .task, title: "Settings page", parentID: frontend.id)
-            try store.create(kind: .task, title: "Auth API", parentID: backend.id, status: .done)
-            try store.create(kind: .task, title: "Sync endpoint", parentID: backend.id)
-            try store.create(kind: .task, title: "Order PCB", parentID: hardware.id, status: .doing)
+            // A project board with sections and a task that has sub-tasks.
+            let orbit = try store.create(kind: .page, title: "Orbit", parentID: nil, view: .board)
+            let frontend = try store.create(kind: .page, title: "Frontend", parentID: orbit.id, view: .checklist)
+            let backend = try store.create(kind: .page, title: "Backend", parentID: orbit.id, view: .checklist)
+            let hardware = try store.create(kind: .page, title: "Hardware", parentID: orbit.id, view: .checklist)
+            let login = try store.create(kind: .entry, title: "Login screen", parentID: frontend.id, status: .doing)
+            try store.create(kind: .entry, title: "Email field", parentID: login.id, status: .done)
+            try store.create(kind: .entry, title: "Password field", parentID: login.id, status: .todo)
+            try store.create(kind: .entry, title: "Settings page", parentID: frontend.id, status: .todo)
+            try store.create(kind: .entry, title: "Auth API", parentID: backend.id, status: .done)
+            try store.create(kind: .entry, title: "Sync endpoint", parentID: backend.id, status: .todo)
+            try store.create(kind: .entry, title: "Order PCB", parentID: hardware.id, status: .doing)
 
-            let movies = try store.create(kind: .list, title: "Movies Watched", parentID: nil)
-            for title in ["Dune", "Interstellar", "Arrival"] {
-                try store.create(kind: .item, title: title, parentID: movies.id)
+            // Simple flat lists with details.
+            let movies = try store.create(kind: .page, title: "Movies Watched", parentID: nil)
+            for (title, rating) in [("Dune", "5"), ("Interstellar", "5"), ("Arrival", "4")] {
+                try store.create(kind: .entry, title: title, parentID: movies.id, details: [NodeDetail(key: "rating", value: rating)])
             }
-            try store.create(kind: .note, title: "Trip ideas", parentID: nil, body: "Hike near the lake\nSunrise at the ridge")
+            let minecraft = try store.create(kind: .page, title: "Minecraft coordinates", parentID: nil)
+            try store.create(kind: .entry, title: "Village", parentID: minecraft.id, details: [
+                NodeDetail(key: "x", value: "120"), NodeDetail(key: "y", value: "64"), NodeDetail(key: "z", value: "-300"),
+            ])
+
+            try store.create(kind: .note, title: "New ideas", parentID: nil, body: "Voice keychain\nSunrise hike app")
         } catch {
             print("Seeding failed: \(error)")
         }

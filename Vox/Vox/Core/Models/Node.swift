@@ -9,8 +9,14 @@ struct Node: Identifiable, Hashable, Sendable {
     var kind: NodeKind
     var title: String
     var body: String?
+    /// Entries only. nil = plain line, set = task.
     var status: TaskStatus?
-    var view: FolderView?
+    /// Pages only.
+    var view: PageView?
+    /// Small ordered fields, like rating or coordinates.
+    var details: [NodeDetail]
+    var dueAt: Date?
+    var estimateMinutes: Int?
     var position: Double
     var createdAt: Date
     var updatedAt: Date
@@ -24,7 +30,10 @@ struct Node: Identifiable, Hashable, Sendable {
         title: String,
         body: String? = nil,
         status: TaskStatus? = nil,
-        view: FolderView? = nil,
+        view: PageView? = nil,
+        details: [NodeDetail] = [],
+        dueAt: Date? = nil,
+        estimateMinutes: Int? = nil,
         position: Double = 0,
         createdAt: Date = .now,
         updatedAt: Date = .now,
@@ -36,21 +45,31 @@ struct Node: Identifiable, Hashable, Sendable {
         self.kind = kind
         self.title = title
         self.body = body
-        // Status only makes sense for tasks, view only for folders.
-        self.status = kind == .task ? (status ?? .todo) : nil
-        self.view = kind == .folder ? (view ?? .list) : nil
+        self.status = kind == .entry ? status : nil
+        self.view = kind == .page ? (view ?? .list) : nil
+        self.details = details
+        self.dueAt = dueAt
+        self.estimateMinutes = estimateMinutes
         self.position = position
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deleted = deleted
     }
+
+    var isTask: Bool { status != nil }
 }
 
 enum NodeKind: String, Codable, CaseIterable, Sendable {
-    case folder, list, item, task, note
+    case page, entry, note
 
-    /// Kinds that can hold children.
-    var isContainer: Bool { self == .folder || self == .list }
+    /// Reads kinds saved by older builds (folder, list, item, task).
+    init(storedValue: String) {
+        switch storedValue {
+        case "page", "folder", "list": self = .page
+        case "note": self = .note
+        default: self = .entry
+        }
+    }
 }
 
 enum TaskStatus: String, Codable, CaseIterable, Sendable {
@@ -65,6 +84,19 @@ enum TaskStatus: String, Codable, CaseIterable, Sendable {
     }
 }
 
-enum FolderView: String, Codable, CaseIterable, Sendable {
-    case list, board
+enum PageView: String, Codable, CaseIterable, Sendable {
+    case list, checklist, board
+
+    var label: String {
+        switch self {
+        case .list: "List"
+        case .checklist: "Checklist"
+        case .board: "Board"
+        }
+    }
+}
+
+struct NodeDetail: Codable, Hashable, Sendable {
+    var key: String
+    var value: String
 }

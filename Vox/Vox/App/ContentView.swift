@@ -12,10 +12,10 @@ struct ContentView: View {
         NavigationStack(path: $path) {
             NodeListView(parentID: nil)
                 .navigationDestination(for: Node.self) { node in
-                    if node.kind == .note {
-                        NoteEditorView(nodeID: node.id)
-                    } else {
-                        NodeListView(parentID: node.id)
+                    switch node.kind {
+                    case .page: NodeListView(parentID: node.id)
+                    case .entry: EntryDetailView(entryID: node.id)
+                    case .note: NoteEditorView(nodeID: node.id)
                     }
                 }
                 .toolbar {
@@ -27,11 +27,15 @@ struct ContentView: View {
         // Dark mode keeps text readable on glass over the scenery.
         .preferredColorScheme(.dark)
         #if DEBUG
-        // Debug only: `-openFirstNode` jumps straight into the first item, handy for screenshots.
+        // Debug only: `-open "Orbit/Frontend"` jumps straight to a screen by titles, handy for screenshots.
         .onAppear {
-            if ProcessInfo.processInfo.arguments.contains("-openFirstNode"),
-               let first = model.children(of: nil).first {
-                path = [first]
+            let args = ProcessInfo.processInfo.arguments
+            guard let flag = args.firstIndex(of: "-open"), args.indices.contains(flag + 1) else { return }
+            var parentID: UUID?
+            for title in args[flag + 1].split(separator: "/") {
+                guard let next = model.children(of: parentID).first(where: { $0.title == title }) else { break }
+                path.append(next)
+                parentID = next.id
             }
         }
         #endif

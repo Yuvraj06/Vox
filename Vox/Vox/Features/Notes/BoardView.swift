@@ -1,27 +1,27 @@
 import SwiftUI
 
-/// All tasks under a folder, in Todo / Doing / Done columns.
+/// Task entries in a page and its sub-pages, in Todo / Doing / Done columns.
 /// Drag a card to another column to change its status.
 struct BoardView: View {
-    let folder: Node
-    /// Subfolder to filter by. nil shows every task under `folder`.
+    let page: Node
+    /// Sub-page to filter by. nil shows every task under `page`.
     @Binding var filterID: UUID?
     @Environment(NotesModel.self) private var model
 
     var body: some View {
-        let subfolders = model.children(of: folder.id).filter { $0.kind == .folder }
-        let tasks = model.tasks(under: filterID ?? folder.id)
+        let subpages = model.children(of: page.id).filter { $0.kind == .page }
+        let tasks = model.boardEntries(under: filterID ?? page.id)
 
         VStack(spacing: 14) {
-            if !subfolders.isEmpty {
-                filterBar(subfolders)
+            if !subpages.isEmpty {
+                filterBar(subpages)
             }
 
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 14) {
                     ForEach(TaskStatus.allCases, id: \.self) { status in
                         BoardColumn(
-                            folder: folder,
+                            page: page,
                             status: status,
                             tasks: tasks.filter { $0.status == status }
                         )
@@ -37,12 +37,12 @@ struct BoardView: View {
         .padding(.top, 8)
     }
 
-    private func filterBar(_ subfolders: [Node]) -> some View {
+    private func filterBar(_ subpages: [Node]) -> some View {
         ScrollView(.horizontal) {
             GlassEffectContainer(spacing: 8) {
                 HStack(spacing: 8) {
                     chip("All", selected: filterID == nil) { filterID = nil }
-                    ForEach(subfolders) { sub in
+                    ForEach(subpages) { sub in
                         chip(sub.title, selected: filterID == sub.id) { filterID = sub.id }
                     }
                 }
@@ -63,7 +63,7 @@ struct BoardView: View {
 }
 
 private struct BoardColumn: View {
-    let folder: Node
+    let page: Node
     let status: TaskStatus
     let tasks: [Node]
     @Environment(NotesModel.self) private var model
@@ -82,7 +82,7 @@ private struct BoardColumn: View {
             ScrollView {
                 LazyVStack(spacing: 10) {
                     ForEach(tasks) { task in
-                        TaskCard(task: task, subfolderName: subfolderName(of: task))
+                        TaskCard(task: task, subpageName: subpageName(of: task))
                     }
                     if tasks.isEmpty {
                         Text("Drop tasks here")
@@ -111,40 +111,46 @@ private struct BoardColumn: View {
         .padding(.bottom, 8)
     }
 
-    /// Shows which subfolder a task lives in, unless it sits directly in the board folder.
-    private func subfolderName(of task: Node) -> String? {
-        guard let parentID = task.parentID, parentID != folder.id else { return nil }
+    /// Shows which sub-page a task lives in, unless it sits directly in the board page.
+    private func subpageName(of task: Node) -> String? {
+        guard let parentID = task.parentID, parentID != page.id else { return nil }
         return model.node(id: parentID)?.title
     }
 }
 
 private struct TaskCard: View {
     let task: Node
-    let subfolderName: String?
+    let subpageName: String?
     @Environment(NotesModel.self) private var model
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Button {
-                model.toggleDone(task)
-            } label: {
-                Image(systemName: task.status == .done ? "checkmark.circle.fill" : "circle")
-                    .imageScale(.large)
-                    .foregroundStyle(task.status == .done ? .green : .secondary)
-            }
-            .buttonStyle(.plain)
+        NavigationLink(value: task) {
+            HStack(alignment: .top, spacing: 10) {
+                StatusCheckbox(node: task)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text(task.title)
-                    .strikethrough(task.status == .done)
-                if let subfolderName {
-                    Label(subfolderName, systemImage: "folder")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(task.title)
+                        .strikethrough(task.status == .done)
+                        .multilineTextAlignment(.leading)
+                    HStack(spacing: 10) {
+                        if let subpageName {
+                            Label(subpageName, systemImage: "doc")
+                        }
+                        if let progress = model.progress(of: task.id) {
+                            Label("\(progress.done)/\(progress.total)", systemImage: "checklist")
+                        }
+                        if let due = task.dueAt {
+                            Label(due.formatted(.dateTime.day().month()), systemImage: "calendar")
+                        }
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
+            .contentShape(.rect)
         }
+        .buttonStyle(.plain)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))

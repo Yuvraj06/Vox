@@ -23,8 +23,9 @@ extension NodeStore {
         title: String,
         parentID: UUID?,
         status: TaskStatus? = nil,
-        view: FolderView? = nil,
-        body: String? = nil
+        view: PageView? = nil,
+        body: String? = nil,
+        details: [NodeDetail] = []
     ) throws -> Node {
         let last = try children(of: parentID).last?.position
         let node = Node(
@@ -34,6 +35,7 @@ extension NodeStore {
             body: body,
             status: status,
             view: view,
+            details: details,
             position: NodeOrdering.position(between: last, and: nil)
         )
         try insert(node)

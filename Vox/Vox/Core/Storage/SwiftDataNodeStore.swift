@@ -3,6 +3,7 @@ import SwiftData
 
 /// SwiftData row for a node. Only this file knows it exists.
 /// Enums are stored as raw strings so the shape matches Postgres.
+/// New fields are optional so older saved data still opens.
 @Model
 final class NodeEntity {
     @Attribute(.unique) var id: UUID
@@ -13,6 +14,10 @@ final class NodeEntity {
     var body: String?
     var status: String?
     var view: String?
+    /// JSON array of {key, value}. Matches the `details` jsonb column.
+    var detailsJSON: String?
+    var dueAt: Date?
+    var estimateMinutes: Int?
     var position: Double
     var createdAt: Date
     var updatedAt: Date
@@ -27,6 +32,9 @@ final class NodeEntity {
         body = node.body
         status = node.status?.rawValue
         view = node.view?.rawValue
+        detailsJSON = Self.encode(node.details)
+        dueAt = node.dueAt
+        estimateMinutes = node.estimateMinutes
         position = node.position
         createdAt = node.createdAt
         updatedAt = node.updatedAt
@@ -41,6 +49,9 @@ final class NodeEntity {
         body = node.body
         status = node.status?.rawValue
         view = node.view?.rawValue
+        detailsJSON = Self.encode(node.details)
+        dueAt = node.dueAt
+        estimateMinutes = node.estimateMinutes
         position = node.position
         updatedAt = node.updatedAt
         deleted = node.deleted
@@ -51,16 +62,29 @@ final class NodeEntity {
             id: id,
             userID: userID,
             parentID: parentID,
-            kind: NodeKind(rawValue: kind) ?? .item,
+            kind: NodeKind(storedValue: kind),
             title: title,
             body: body,
             status: status.flatMap(TaskStatus.init(rawValue:)),
-            view: view.flatMap(FolderView.init(rawValue:)),
+            view: view.flatMap(PageView.init(rawValue:)),
+            details: Self.decode(detailsJSON),
+            dueAt: dueAt,
+            estimateMinutes: estimateMinutes,
             position: position,
             createdAt: createdAt,
             updatedAt: updatedAt,
             deleted: deleted
         )
+    }
+
+    private static func encode(_ details: [NodeDetail]) -> String? {
+        guard !details.isEmpty, let data = try? JSONEncoder().encode(details) else { return nil }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func decode(_ json: String?) -> [NodeDetail] {
+        guard let json else { return [] }
+        return (try? JSONDecoder().decode([NodeDetail].self, from: Data(json.utf8))) ?? []
     }
 }
 

@@ -111,8 +111,8 @@ extension View {
             .background { SceneryBackground() }
     }
 
-    /// A list row drawn as a floating glass card.
-    func glassRow() -> some View {
+    /// A list row drawn as a floating glass card. `indent` shifts it right for tree levels.
+    func glassRow(indent: CGFloat = 0) -> some View {
         padding(.horizontal, 16)
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -120,7 +120,7 @@ extension View {
             .glassEffect(.regular, in: .rect(cornerRadius: 18))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
+            .listRowInsets(EdgeInsets(top: 5, leading: 16 + indent, bottom: 5, trailing: 16))
     }
 }
 

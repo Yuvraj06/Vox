@@ -1,71 +1,57 @@
 import SwiftUI
 
-/// Shows the children of one node, or the top level when `parentID` is nil.
+/// The top level (`parentID` nil) or one page, shown as a list, checklist, or board.
 struct NodeListView: View {
     let parentID: UUID?
     @Environment(NotesModel.self) private var model
 
-    @State private var prompt: Prompt?
-    @State private var draft = ""
+    @State private var prompt: NodePrompt?
     @State private var boardFilter: UUID?
 
-    private enum Prompt {
-        case add(NodeKind)
-        case rename(Node)
-
-        var title: String {
-            switch self {
-            case .add(let kind): "New \(kind.name.lowercased())"
-            case .rename: "Rename"
-            }
-        }
-
-        var confirm: String {
-            switch self {
-            case .add: "Add"
-            case .rename: "Save"
-            }
-        }
-    }
-
     var body: some View {
-        let parent = parentID.flatMap { model.node(id: $0) }
-        let board = parent.flatMap { $0.kind == .folder && $0.view == .board ? $0 : nil }
+        let page = parentID.flatMap { model.node(id: $0) }
+        let view = page?.view ?? .list
 
         Group {
-            if let board {
-                BoardView(folder: board, filterID: $boardFilter)
-            } else {
+            switch view {
+            case .board:
+                if let page { BoardView(page: page, filterID: $boardFilter) }
+            case .checklist:
+                ChecklistView(parentID: parentID)
+            case .list:
                 list
             }
         }
         .sceneryBackground()
-        .navigationTitle(parent?.title ?? "Vox")
+        .navigationTitle(page?.title ?? "Vox")
         .toolbar {
-            if let parent, parent.kind == .folder {
+            if let page {
                 ToolbarItem(placement: .topBarTrailing) {
-                    if board != nil {
-                        Button("Show list", systemImage: "list.bullet") { model.setView(parent, .list) }
-                    } else {
-                        Button("Show board", systemImage: "rectangle.split.3x1") { model.setView(parent, .board) }
+                    Menu("View", systemImage: view.icon) {
+                        Picker("View", selection: Binding(get: { view }, set: { model.setView(page, $0) })) {
+                            ForEach(PageView.allCases, id: \.self) { option in
+                                Label(option.label, systemImage: option.icon)
+                            }
+                        }
                     }
                 }
             }
-            if board == nil {
+            if view == .list {
                 ToolbarItem(placement: .topBarTrailing) { EditButton() }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("Add", systemImage: "plus") {
-                    ForEach(NodeKind.addable(inside: parent?.kind), id: \.self) { kind in
-                        Button(kind.name, systemImage: kind.icon) { startPrompt(.add(kind)) }
+                    ForEach(NodeKind.addable(inside: page?.kind), id: \.self) { kind in
+                        Button(kind.name, systemImage: kind.addIcon) { prompt = .add(kind) }
                     }
                 }
             }
         }
-        .alert(prompt?.title ?? "", isPresented: isPrompting) {
-            TextField("Title", text: $draft)
-            Button(prompt?.confirm ?? "OK", action: commitPrompt)
-            Button("Cancel", role: .cancel) {}
+        .nodePrompt($prompt) { kind, title in
+            // Checklists and boards are for tasks, so new items start as Todo there.
+            let status: TaskStatus? = kind == .entry && view != .list ? .todo : nil
+            // On a filtered board, new things go into the selected sub-page.
+            model.add(kind: kind, title: title, parentID: boardFilter ?? parentID, status: status)
         }
     }
 
@@ -74,111 +60,89 @@ struct NodeListView: View {
 
         return List {
             ForEach(kids) { node in
-                row(node)
+                NodeRow(node: node)
                     .glassRow()
                     .swipeActions {
                         Button("Delete", systemImage: "trash", role: .destructive) {
                             model.delete([node.id])
                         }
-                        Button("Rename", systemImage: "pencil") {
-                            startPrompt(.rename(node))
-                        }
+                        Button("Rename", systemImage: "pencil") { prompt = .rename(node) }
                     }
-                    .contextMenu { menu(for: node) }
+                    .contextMenu { NodeMenu(node: node) { prompt = .rename(node) } }
             }
             .onMove { model.move(in: parentID, from: $0, to: $1) }
             .onDelete { offsets in model.delete(offsets.map { kids[$0].id }) }
         }
         .listStyle(.plain)
         .overlay {
-            if kids.isEmpty {
-                ContentUnavailableView(
-                    "Nothing here yet",
-                    systemImage: "tray",
-                    description: Text("Tap + to add something.")
-                )
-                .padding(24)
-                .glassEffect(.regular, in: .rect(cornerRadius: 28))
-                .padding(32)
-            }
+            if kids.isEmpty { EmptyGlassState() }
+        }
+    }
+}
+
+struct EmptyGlassState: View {
+    var body: some View {
+        ContentUnavailableView(
+            "Nothing here yet",
+            systemImage: "tray",
+            description: Text("Tap + to add something.")
+        )
+        .padding(24)
+        .glassEffect(.regular, in: .rect(cornerRadius: 28))
+        .padding(32)
+    }
+}
+
+// MARK: Add / rename prompt
+
+enum NodePrompt {
+    case add(NodeKind)
+    case rename(Node)
+
+    var id: String {
+        switch self {
+        case .add(let kind): "add-\(kind.rawValue)"
+        case .rename(let node): "rename-\(node.id)"
         }
     }
 
-    // MARK: Rows
-
-    @ViewBuilder
-    private func row(_ node: Node) -> some View {
-        switch node.kind {
-        case .folder, .list, .note:
-            // Hidden link under a custom row, so the chevron stays inside the glass card.
-            ZStack {
-                NavigationLink(value: node) { EmptyView() }.opacity(0)
-                HStack(spacing: 12) {
-                    Image(systemName: node.kind.icon)
-                        .font(.title3)
-                        .frame(width: 28)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(node.title).font(.body.weight(.medium))
-                        if let subtitle = subtitle(for: node) {
-                            Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                        }
-                    }
-                    Spacer()
-                    Image(systemName: "chevron.right")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                }
-            }
-        case .task:
-            TaskRow(node: node) { model.toggleDone(node) }
-        case .item:
-            Text(node.title)
+    var title: String {
+        switch self {
+        case .add(let kind): "New \(kind.name.lowercased())"
+        case .rename: "Rename"
         }
     }
+}
 
-    @ViewBuilder
-    private func menu(for node: Node) -> some View {
-        if node.kind == .task {
-            Picker("Status", selection: Binding(
-                get: { node.status ?? .todo },
-                set: { model.setStatus(node, $0) }
+private struct NodePromptModifier: ViewModifier {
+    @Binding var prompt: NodePrompt?
+    let onAdd: (NodeKind, String) -> Void
+    @Environment(NotesModel.self) private var model
+    @State private var draft = ""
+
+    func body(content: Content) -> some View {
+        content
+            .alert(prompt?.title ?? "", isPresented: Binding(
+                get: { prompt != nil },
+                set: { if !$0 { prompt = nil } }
             )) {
-                ForEach(TaskStatus.allCases, id: \.self) { Text($0.label) }
+                TextField("Title", text: $draft)
+                Button(isRename ? "Save" : "Add", action: commit)
+                Button("Cancel", role: .cancel) {}
             }
-        }
-        Button("Rename", systemImage: "pencil") { startPrompt(.rename(node)) }
-        Button("Delete", systemImage: "trash", role: .destructive) { model.delete([node.id]) }
+            // Fill the text box each time a new prompt opens.
+            .onChange(of: prompt?.id) {
+                if case .rename(let node) = prompt { draft = node.title } else { draft = "" }
+            }
     }
 
-    private func subtitle(for node: Node) -> String? {
-        switch node.kind {
-        case .note:
-            return node.body?.split(separator: "\n").first.map(String.init)
-        case .folder where node.view == .board:
-            return "Board · \(model.tasks(under: node.id).count) tasks"
-        case .folder, .list:
-            let count = model.children(of: node.id).count
-            return count == 1 ? "1 item" : "\(count) items"
-        default:
-            return nil
-        }
+    private var isRename: Bool {
+        if case .rename = prompt { true } else { false }
     }
 
-    // MARK: Prompt
-
-    private var isPrompting: Binding<Bool> {
-        Binding(get: { prompt != nil }, set: { if !$0 { prompt = nil } })
-    }
-
-    private func startPrompt(_ newPrompt: Prompt) {
-        if case .rename(let node) = newPrompt { draft = node.title } else { draft = "" }
-        prompt = newPrompt
-    }
-
-    private func commitPrompt() {
+    private func commit() {
         switch prompt {
-        // On a filtered board, new things go into the selected subfolder.
-        case .add(let kind): model.add(kind: kind, title: draft, parentID: boardFilter ?? parentID)
+        case .add(let kind): onAdd(kind, draft)
         case .rename(let node): model.rename(node, to: draft)
         case nil: break
         }
@@ -186,74 +150,9 @@ struct NodeListView: View {
     }
 }
 
-/// A task with a tappable circle. Long press the row to pick Todo, Doing or Done.
-private struct TaskRow: View {
-    let node: Node
-    let toggle: () -> Void
-
-    var body: some View {
-        HStack {
-            Button(action: toggle) {
-                Image(systemName: icon)
-                    .foregroundStyle(node.status == .done ? .green : .secondary)
-                    .imageScale(.large)
-            }
-            .buttonStyle(.plain)
-
-            Text(node.title)
-                .strikethrough(node.status == .done)
-                .foregroundStyle(node.status == .done ? .secondary : .primary)
-
-            Spacer()
-
-            if node.status == .doing {
-                Text("Doing")
-                    .font(.caption.bold())
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 2)
-                    .background(.orange.opacity(0.2), in: .capsule)
-                    .foregroundStyle(.orange)
-            }
-        }
-    }
-
-    private var icon: String {
-        switch node.status {
-        case .done: "checkmark.circle.fill"
-        case .doing: "circle.lefthalf.filled"
-        default: "circle"
-        }
-    }
-}
-
-extension NodeKind {
-    var name: String {
-        switch self {
-        case .folder: "Folder"
-        case .list: "List"
-        case .item: "Item"
-        case .task: "Task"
-        case .note: "Note"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .folder: "folder"
-        case .list: "list.bullet"
-        case .item: "circle.fill"
-        case .task: "checkmark.circle"
-        case .note: "note.text"
-        }
-    }
-
-    /// What the + menu offers inside a parent of this kind (nil = top level).
-    static func addable(inside parent: NodeKind?) -> [NodeKind] {
-        switch parent {
-        case nil: [.folder, .list, .note]
-        case .folder: [.folder, .list, .task, .note]
-        case .list: [.item, .task]
-        default: []
-        }
+extension View {
+    /// Text prompt for adding or renaming a node.
+    func nodePrompt(_ prompt: Binding<NodePrompt?>, onAdd: @escaping (NodeKind, String) -> Void) -> some View {
+        modifier(NodePromptModifier(prompt: prompt, onAdd: onAdd))
     }
 }
