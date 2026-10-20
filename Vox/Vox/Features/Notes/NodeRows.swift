@@ -1,12 +1,15 @@
 import SwiftUI
 
-/// A row that opens a node: pages, notes, and entries.
+/// A row that opens an item or a note.
 /// Tasks get a checkbox you can tap without opening the row.
 struct NodeRow: View {
     let node: Node
     @Environment(NotesModel.self) private var model
 
     var body: some View {
+        let hasChildren = !model.children(of: node.id).isEmpty
+        let isContainer = node.kind == .note || hasChildren || node.view != .list
+
         // Hidden link under a custom row, so the chevron stays inside the glass card.
         ZStack {
             NavigationLink(value: node) { EmptyView() }.opacity(0)
@@ -14,17 +17,17 @@ struct NodeRow: View {
                 if node.isTask {
                     StatusCheckbox(node: node)
                 } else {
-                    Image(systemName: node.icon)
-                        .font(node.kind == .entry ? .caption2 : .title3)
-                        .foregroundStyle(node.kind == .entry ? .secondary : .primary)
+                    Image(systemName: isContainer ? node.icon : "circle.fill")
+                        .font(isContainer ? .title3 : .caption2)
+                        .foregroundStyle(node.columnType?.tint ?? (isContainer ? .primary : .secondary))
                         .frame(width: 28)
                 }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(node.title)
-                        .font(node.kind == .entry ? .body : .body.weight(.medium))
+                        .font(isContainer ? .body.weight(.medium) : .body)
                         .strikethrough(node.status == .done)
                         .foregroundStyle(node.status == .done ? .secondary : .primary)
-                    if let subtitle = subtitle {
+                    if let subtitle {
                         Text(subtitle).font(.caption).foregroundStyle(.secondary)
                     }
                 }
@@ -38,31 +41,26 @@ struct NodeRow: View {
     }
 
     private var subtitle: String? {
-        switch node.kind {
-        case .note:
+        if node.kind == .note {
             return node.body?.split(separator: "\n").first.map(String.init)
-        case .page:
-            if node.view == .board {
-                return "Board · \(model.boardEntries(under: node.id).count) tasks"
-            }
-            let count = model.children(of: node.id).count
-            return count == 1 ? "1 item" : "\(count) items"
-        case .entry:
-            var parts: [String] = []
-            if !node.details.isEmpty { parts.append(node.detailsSummary) }
-            if let progress = model.progress(of: node.id) {
-                parts.append("\(progress.done)/\(progress.total) done")
-            } else {
-                let count = model.children(of: node.id).count
-                if count > 0 { parts.append(count == 1 ? "1 sub-item" : "\(count) sub-items") }
-            }
-            if let due = node.dueAt { parts.append("Due \(due.formatted(.relative(presentation: .named)))") }
-            return parts.isEmpty ? nil : parts.joined(separator: " · ")
         }
+        var parts: [String] = []
+        if !node.details.isEmpty { parts.append(node.detailsSummary) }
+        if node.isBoard {
+            let cards = model.cardCount(of: node)
+            parts.append("Board · \(cards == 1 ? "1 card" : "\(cards) cards")")
+        } else if let progress = model.progress(of: node.id) {
+            parts.append("\(progress.done)/\(progress.total) done")
+        } else {
+            let count = model.children(of: node.id).count
+            if count > 0 { parts.append(count == 1 ? "1 item" : "\(count) items") }
+        }
+        if let due = node.dueAt { parts.append("Due \(due.formatted(.relative(presentation: .named)))") }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
 
-/// Tap to toggle done. Plain entries become tasks the first time.
+/// Tap to toggle done. Plain items become tasks the first time.
 struct StatusCheckbox: View {
     let node: Node
     /// No status color, for cards in neutral columns.
@@ -108,7 +106,7 @@ struct NodeMenu: View {
     @Environment(NotesModel.self) private var model
 
     var body: some View {
-        if node.kind == .entry {
+        if node.kind == .item {
             Picker("Status", selection: Binding(
                 get: { node.status },
                 set: { model.setStatus(node, $0) }
@@ -125,8 +123,7 @@ struct NodeMenu: View {
 extension Node {
     var icon: String {
         switch kind {
-        case .page: view?.icon ?? "doc"
-        case .entry: "circle.fill"
+        case .item: view?.icon ?? "list.bullet"
         case .note: "note.text"
         }
     }
@@ -155,27 +152,15 @@ extension NodeKind {
     /// Name shown in the + menu.
     var name: String {
         switch self {
-        case .page: "Page"
-        case .entry: "Item"
+        case .item: "Item"
         case .note: "Note"
         }
     }
 
     var addIcon: String {
         switch self {
-        case .page: "doc"
-        case .entry: "circle"
+        case .item: "circle"
         case .note: "note.text"
-        }
-    }
-
-    /// What the + menu offers inside a parent of this kind (nil = top level).
-    static func addable(inside parent: NodeKind?) -> [NodeKind] {
-        switch parent {
-        case nil: [.page, .note]
-        case .page: [.entry, .page, .note]
-        case .entry: [.entry]
-        case .note: []
         }
     }
 }

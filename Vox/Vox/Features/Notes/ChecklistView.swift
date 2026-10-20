@@ -1,13 +1,13 @@
 import SwiftUI
 
-/// Entries with checkboxes, and their sub-entries as a foldable tree.
+/// Items with checkboxes, and their children as a foldable tree.
 struct ChecklistView: View {
     let parentID: UUID?
     @Environment(NotesModel.self) private var model
 
     @State private var collapsed: Set<UUID> = []
     @State private var prompt: NodePrompt?
-    /// Where "Add sub-item" puts the new entry.
+    /// Where "Add sub-item" puts the new item.
     @State private var addTarget: UUID?
 
     private struct Row: Identifiable {
@@ -23,7 +23,7 @@ struct ChecklistView: View {
         List {
             ForEach(rows) { row in
                 Group {
-                    if row.node.kind == .entry {
+                    if row.node.kind == .item {
                         entryRow(row)
                     } else {
                         NodeRow(node: row.node)
@@ -34,10 +34,10 @@ struct ChecklistView: View {
                     Button("Delete", systemImage: "trash", role: .destructive) { model.delete([row.node.id]) }
                 }
                 .contextMenu {
-                    if row.node.kind == .entry {
+                    if row.node.kind == .item {
                         Button("Add sub-item", systemImage: "plus") {
                             addTarget = row.node.id
-                            prompt = .add(.entry)
+                            prompt = .add(.item)
                         }
                     }
                     NodeMenu(node: row.node) { prompt = .rename(row.node) }
@@ -50,7 +50,7 @@ struct ChecklistView: View {
         }
         .nodePrompt($prompt) { _, title in
             if let addTarget {
-                model.add(kind: .entry, title: title, parentID: addTarget, status: .todo)
+                model.add(kind: .item, title: title, parentID: addTarget, status: .todo)
                 collapsed.remove(addTarget)
             }
             addTarget = nil
@@ -96,7 +96,7 @@ struct ChecklistView: View {
     /// Turns the tree into rows, skipping the children of folded entries.
     private func flatten(_ id: UUID?, depth: Int) -> [Row] {
         model.children(of: id).flatMap { child -> [Row] in
-            let kids = child.kind == .entry ? model.children(of: child.id) : []
+            let kids = child.kind == .item ? model.children(of: child.id) : []
             let row = Row(node: child, depth: depth, hasChildren: !kids.isEmpty)
             guard !kids.isEmpty, !collapsed.contains(child.id) else { return [row] }
             return [row] + flatten(child.id, depth: depth + 1)

@@ -5,10 +5,14 @@ import Testing
 @MainActor
 struct NodeStoreTests {
     let store: SwiftDataNodeStore
+    let model: NotesModel
 
     init() throws {
         store = try .inMemory()
+        model = NotesModel(store: store)
     }
+
+    // MARK: Storage
 
     @Test func positionMath() {
         #expect(NodeOrdering.position(between: nil, and: nil) == 1)
@@ -18,72 +22,69 @@ struct NodeStoreTests {
     }
 
     @Test func createAppendsInOrder() throws {
-        let movies = try store.create(kind: .page, title: "Movies Watched", parentID: nil)
-        try store.create(kind: .entry, title: "Dune", parentID: movies.id)
-        try store.create(kind: .entry, title: "Alien", parentID: movies.id)
+        let movies = try store.create(kind: .item, title: "Movies Watched", parentID: nil)
+        try store.create(kind: .item, title: "Dune", parentID: movies.id)
+        try store.create(kind: .item, title: "Alien", parentID: movies.id)
 
-        let titles = try store.children(of: movies.id).map(\.title)
-        #expect(titles == ["Dune", "Alien"])
+        #expect(try store.children(of: movies.id).map(\.title) == ["Dune", "Alien"])
         #expect(try store.children(of: nil).map(\.title) == ["Movies Watched"])
     }
 
     @Test func kindSpecificFields() throws {
-        let page = try store.create(kind: .page, title: "Orbit", parentID: nil, view: .board)
-        let plainPage = try store.create(kind: .page, title: "Ideas", parentID: nil)
-        let task = try store.create(kind: .entry, title: "Build UI", parentID: page.id, status: .todo)
-        let line = try store.create(kind: .entry, title: "Dune", parentID: page.id)
-        let note = try store.create(kind: .note, title: "Note", parentID: nil, status: .done, view: .board)
+        let item = try store.create(kind: .item, title: "Orbit", parentID: nil, view: .board, columnType: .todo)
+        let plain = try store.create(kind: .item, title: "Ideas", parentID: nil)
+        let note = try store.create(kind: .note, title: "Note", parentID: nil, status: .done, view: .board, columnType: .done)
 
-        #expect(try store.node(id: page.id)?.view == .board)
-        #expect(try store.node(id: plainPage.id)?.view == .list)
-        #expect(try store.node(id: task.id)?.status == .todo)
-        #expect(try store.node(id: line.id)?.status == nil)
+        #expect(try store.node(id: item.id)?.view == .board)
+        #expect(try store.node(id: item.id)?.columnType == .todo)
+        #expect(try store.node(id: plain.id)?.view == .list)
+        #expect(try store.node(id: plain.id)?.status == nil)
         #expect(try store.node(id: note.id)?.status == nil)
         #expect(try store.node(id: note.id)?.view == nil)
+        #expect(try store.node(id: note.id)?.columnType == nil)
     }
 
     @Test func detailsAndDueRoundTrip() throws {
-        var entry = try store.create(
-            kind: .entry, title: "Village", parentID: nil,
+        var item = try store.create(
+            kind: .item, title: "Village", parentID: nil,
             details: [NodeDetail(key: "x", value: "120"), NodeDetail(key: "z", value: "-300")]
         )
-        #expect(try store.node(id: entry.id)?.details.map(\.key) == ["x", "z"])
+        #expect(try store.node(id: item.id)?.details.map(\.key) == ["x", "z"])
 
         let due = Date(timeIntervalSince1970: 2_000_000_000)
-        entry.dueAt = due
-        entry.estimateMinutes = 90
-        entry.details = []
-        try store.update(entry)
+        item.dueAt = due
+        item.estimateMinutes = 90
+        item.details = []
+        try store.update(item)
 
-        let saved = try #require(try store.node(id: entry.id))
+        let saved = try #require(try store.node(id: item.id))
         #expect(saved.dueAt == due)
         #expect(saved.estimateMinutes == 90)
         #expect(saved.details.isEmpty)
     }
 
     @Test func oldKindsStillLoad() {
-        #expect(NodeKind(storedValue: "folder") == .page)
-        #expect(NodeKind(storedValue: "list") == .page)
-        #expect(NodeKind(storedValue: "item") == .entry)
-        #expect(NodeKind(storedValue: "task") == .entry)
+        for old in ["page", "entry", "folder", "list", "item", "task"] {
+            #expect(NodeKind(storedValue: old) == .item)
+        }
         #expect(NodeKind(storedValue: "note") == .note)
     }
 
     @Test func moveReorders() throws {
-        let page = try store.create(kind: .page, title: "L", parentID: nil)
-        let a = try store.create(kind: .entry, title: "A", parentID: page.id)
-        try store.create(kind: .entry, title: "B", parentID: page.id)
-        try store.create(kind: .entry, title: "C", parentID: page.id)
+        let list = try store.create(kind: .item, title: "L", parentID: nil)
+        let a = try store.create(kind: .item, title: "A", parentID: list.id)
+        try store.create(kind: .item, title: "B", parentID: list.id)
+        try store.create(kind: .item, title: "C", parentID: list.id)
 
         try store.move(id: a.id, toIndex: 2)
-        #expect(try store.children(of: page.id).map(\.title) == ["B", "C", "A"])
+        #expect(try store.children(of: list.id).map(\.title) == ["B", "C", "A"])
 
         try store.move(id: a.id, toIndex: 1)
-        #expect(try store.children(of: page.id).map(\.title) == ["B", "A", "C"])
+        #expect(try store.children(of: list.id).map(\.title) == ["B", "A", "C"])
     }
 
     @Test func updateSavesAndBumpsTimestamp() throws {
-        var task = try store.create(kind: .entry, title: "Old", parentID: nil, status: .todo)
+        var task = try store.create(kind: .item, title: "Old", parentID: nil, status: .todo)
         let before = task.updatedAt
         task.title = "New"
         task.status = .doing
@@ -96,9 +97,9 @@ struct NodeStoreTests {
     }
 
     @Test func deleteIsSoftAndRecursive() throws {
-        let orbit = try store.create(kind: .page, title: "Orbit", parentID: nil)
-        let frontend = try store.create(kind: .page, title: "Frontend", parentID: orbit.id)
-        let task = try store.create(kind: .entry, title: "Login", parentID: frontend.id, status: .todo)
+        let orbit = try store.create(kind: .item, title: "Orbit", parentID: nil)
+        let frontend = try store.create(kind: .item, title: "Frontend", parentID: orbit.id)
+        let task = try store.create(kind: .item, title: "Login", parentID: frontend.id, status: .todo)
         #expect(try store.descendants(of: orbit.id).count == 2)
 
         try store.delete(id: orbit.id)
@@ -108,87 +109,106 @@ struct NodeStoreTests {
         #expect(try store.children(of: nil).isEmpty)
     }
 
-    @Test func boardShowsTasksFromSubPagesButNotSubEntries() throws {
-        let model = NotesModel(store: store)
-        let orbit = try store.create(kind: .page, title: "Orbit", parentID: nil, view: .board)
-        let frontend = try store.create(kind: .page, title: "Frontend", parentID: orbit.id)
-        let login = try store.create(kind: .entry, title: "Login", parentID: frontend.id, status: .doing)
-        try store.create(kind: .entry, title: "Email field", parentID: login.id, status: .done)
-        try store.create(kind: .entry, title: "Password field", parentID: login.id, status: .todo)
-        try store.create(kind: .entry, title: "Plain line", parentID: orbit.id)
-        try store.create(kind: .entry, title: "Deploy", parentID: orbit.id, status: .todo)
+    // MARK: Boards
 
-        let cards = model.boardEntries(under: orbit.id).map(\.title).sorted()
-        #expect(cards == ["Deploy", "Login"])
-        #expect(model.progress(of: login.id)?.done == 1)
-        #expect(model.progress(of: login.id)?.total == 2)
+    /// Makes a board with Todo / Doing / Done columns and returns the columns by title.
+    private func makeBoard(_ title: String, in parentID: UUID? = nil) throws -> (Node, [String: Node]) {
+        let board = try store.create(kind: .item, title: title, parentID: parentID)
+        model.setView(board, .board)
+        let columns = Dictionary(uniqueKeysWithValues: model.columnItems(in: board).map { ($0.title, $0) })
+        return (try #require(model.node(id: board.id)), columns)
     }
 
-    @Test func toggleDoneTurnsPlainEntryIntoTask() throws {
-        let model = NotesModel(store: store)
-        let line = try store.create(kind: .entry, title: "Dune", parentID: nil)
+    @Test func emptyItemBecomesBoardWithDefaultColumns() throws {
+        let (board, columns) = try makeBoard("Orbit")
+        #expect(model.columns(for: board).map(\.title) == ["Todo", "Doing", "Done"])
+        #expect(columns["Done"]?.columnType == .done)
+    }
+
+    @Test func boardCardsAreTheSameItemsAsTheList() throws {
+        let (board, columns) = try makeBoard("Orbit")
+        let todo = try #require(model.columns(for: board).first)
+        model.addCard("hi", to: todo)
+
+        // List view of the board: an item "Todo" with "hi" inside.
+        #expect(model.children(of: board.id).map(\.title) == ["Todo", "Doing", "Done"])
+        let hi = try #require(model.children(of: columns["Todo"]!.id).first)
+        #expect(hi.title == "hi")
+        #expect(hi.status == .todo)
+    }
+
+    @Test func sectionsMergeColumnsByTitle() throws {
+        let (orbit, _) = try makeBoard("Orbit")
+        // Remove Orbit's own columns so only sections remain.
+        model.delete(model.columnItems(in: orbit).map(\.id))
+        let (frontend, fe) = try makeBoard("Frontend", in: orbit.id)
+        let (backend, be) = try makeBoard("Backend", in: orbit.id)
+        try store.create(kind: .item, title: "Login", parentID: fe["Doing"]!.id, status: .doing)
+        try store.create(kind: .item, title: "API", parentID: be["Doing"]!.id, status: .doing)
+
+        let merged = model.columns(for: orbit)
+        #expect(merged.map(\.title) == ["Todo", "Doing", "Done"])
+        #expect(merged[1].cards.map(\.title).sorted() == ["API", "Login"])
+        #expect(model.sections(of: orbit).map(\.id) == [frontend.id, backend.id])
+
+        // Filter to one section.
+        let onlyFrontend = model.columns(for: orbit, section: frontend)
+        #expect(onlyFrontend[1].cards.map(\.title) == ["Login"])
+    }
+
+    @Test func dropStaysInSectionAndCreatesMissingColumn() throws {
+        let (orbit, _) = try makeBoard("Orbit")
+        model.delete(model.columnItems(in: orbit).map(\.id))
+        let (frontend, fe) = try makeBoard("Frontend", in: orbit.id)
+        let (_, _) = try makeBoard("Backend", in: orbit.id)
+        // Backend gets an extra "Testing" column that Frontend lacks.
+        let backend = try #require(model.sections(of: orbit).last)
+        model.saveColumns(model.columnDrafts(in: backend) + [.init(id: nil, title: "Testing", type: .doing)], in: backend)
+
+        let card = try store.create(kind: .item, title: "Login", parentID: fe["Todo"]!.id, status: .todo)
+        let testing = try #require(model.columns(for: orbit).first { $0.title == "Testing" })
+        model.drop(card, into: testing)
+
+        let moved = try #require(model.node(id: card.id))
+        let newColumn = try #require(moved.parentID.flatMap { model.node(id: $0) })
+        #expect(newColumn.title == "Testing")
+        #expect(newColumn.parentID == frontend.id) // stayed in Frontend
+        #expect(moved.status == .doing)
+    }
+
+    @Test func tickingDoneMovesCardToDoneColumn() throws {
+        let (_, columns) = try makeBoard("Orbit")
+        let card = try store.create(kind: .item, title: "Ship", parentID: columns["Doing"]!.id, status: .doing)
+        model.toggleDone(card)
+        let saved = try #require(model.node(id: card.id))
+        #expect(saved.status == .done)
+        #expect(saved.parentID == columns["Done"]!.id)
+    }
+
+    @Test func neutralColumnRules() throws {
+        #expect(ColumnRules.accepts(nil, .todo))
+        #expect(ColumnRules.accepts(nil, .doing))
+        #expect(!ColumnRules.accepts(nil, .done))
+        #expect(ColumnRules.statusOnDrop(into: nil, from: .doing) == .doing)
+        #expect(ColumnRules.statusOnDrop(into: nil, from: .done) == .todo)
+        #expect(ColumnRules.statusOnDrop(into: .done, from: .todo) == .done)
+    }
+
+    @Test func removingColumnMovesItsCards() throws {
+        let (board, columns) = try makeBoard("Orbit")
+        let card = try store.create(kind: .item, title: "Ship", parentID: columns["Doing"]!.id, status: .doing)
+        let drafts = model.columnDrafts(in: board).filter { $0.title != "Doing" }
+        model.saveColumns(drafts, in: board)
+
+        #expect(model.columnItems(in: board).map(\.title) == ["Todo", "Done"])
+        let saved = try #require(model.node(id: card.id))
+        #expect(saved.parentID == columns["Todo"]!.id)
+        #expect(saved.status == .todo)
+    }
+
+    @Test func toggleDoneTurnsPlainItemIntoTask() throws {
+        let line = try store.create(kind: .item, title: "Dune", parentID: nil)
         model.toggleDone(line)
         #expect(try store.node(id: line.id)?.status == .done)
-    }
-
-    @Test func cardPlacementFollowsColumnAndStatus() {
-        let ideas = BoardColumnDef(title: "Ideas", status: .todo)
-        let building = BoardColumnDef(title: "Building", status: .doing)
-        let testing = BoardColumnDef(title: "Testing", status: .doing)
-        let shipped = BoardColumnDef(title: "Shipped", status: .done)
-        let columns = [ideas, building, testing, shipped]
-
-        // Own column wins while its type matches the status.
-        let inTesting = Node(kind: .entry, title: "A", status: .doing, columnID: testing.id)
-        #expect(BoardColumnDef.placement(of: inTesting, in: columns) == testing.id)
-
-        // No column yet: first column of that type.
-        let fresh = Node(kind: .entry, title: "B", status: .doing)
-        #expect(BoardColumnDef.placement(of: fresh, in: columns) == building.id)
-
-        // Ticked done from a checkbox: leaves Testing, lands in the Done-type column.
-        let ticked = Node(kind: .entry, title: "C", status: .done, columnID: testing.id)
-        #expect(BoardColumnDef.placement(of: ticked, in: columns) == shipped.id)
-
-        // Its column was deleted and no column has its type: first column.
-        let orphan = Node(kind: .entry, title: "D", status: .done, columnID: UUID())
-        #expect(BoardColumnDef.placement(of: orphan, in: [ideas, building]) == ideas.id)
-    }
-
-    @Test func movingCardSetsColumnAndStatus() throws {
-        let model = NotesModel(store: store)
-        let page = try store.create(kind: .page, title: "Orbit", parentID: nil, view: .board)
-        let shipped = BoardColumnDef(title: "Shipped", status: .done)
-        model.setColumns(page, [BoardColumnDef(title: "Ideas", status: .todo), shipped])
-        #expect(try store.node(id: page.id)?.columns.map(\.title) == ["Ideas", "Shipped"])
-
-        let task = try store.create(kind: .entry, title: "Deploy", parentID: page.id, status: .todo)
-        model.move(task, to: shipped)
-        let saved = try #require(try store.node(id: task.id))
-        #expect(saved.columnID == shipped.id)
-        #expect(saved.status == .done)
-    }
-
-    @Test func neutralColumns() throws {
-        let ideas = BoardColumnDef(title: "Ideas", status: nil)
-        let doing = BoardColumnDef(title: "Doing", status: .doing)
-        let done = BoardColumnDef(title: "Done", status: .done)
-        let columns = [ideas, doing, done]
-
-        // A todo task with no column lands in the neutral column, since no Todo column exists.
-        #expect(BoardColumnDef.placement(of: Node(kind: .entry, title: "A", status: .todo), in: columns) == ideas.id)
-        // A doing task prefers the typed Doing column over neutral.
-        #expect(BoardColumnDef.placement(of: Node(kind: .entry, title: "B", status: .doing), in: columns) == doing.id)
-        // A doing task placed in neutral stays there.
-        let parked = Node(kind: .entry, title: "C", status: .doing, columnID: ideas.id)
-        #expect(BoardColumnDef.placement(of: parked, in: columns) == ideas.id)
-        // Ticked done while in neutral: moves to Done.
-        let ticked = Node(kind: .entry, title: "D", status: .done, columnID: ideas.id)
-        #expect(BoardColumnDef.placement(of: ticked, in: columns) == done.id)
-
-        // Dropping into neutral keeps Todo or Doing, and reopens Done.
-        #expect(ideas.statusOnDrop(from: .doing) == .doing)
-        #expect(ideas.statusOnDrop(from: .done) == .todo)
-        #expect(done.statusOnDrop(from: .todo) == .done)
     }
 }

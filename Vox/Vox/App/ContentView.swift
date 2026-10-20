@@ -13,8 +13,7 @@ struct ContentView: View {
             NodeListView(parentID: nil)
                 .navigationDestination(for: Node.self) { node in
                     switch node.kind {
-                    case .page: NodeListView(parentID: node.id)
-                    case .entry: EntryDetailView(entryID: node.id)
+                    case .item: NodeListView(parentID: node.id)
                     case .note: NoteEditorView(nodeID: node.id)
                     }
                 }

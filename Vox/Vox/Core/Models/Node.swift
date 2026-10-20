@@ -9,14 +9,12 @@ struct Node: Identifiable, Hashable, Sendable {
     var kind: NodeKind
     var title: String
     var body: String?
-    /// Entries only. nil = plain line, set = task.
+    /// nil = plain item, set = task.
     var status: TaskStatus?
-    /// Pages only.
+    /// Items only. How this item's children are shown.
     var view: PageView?
-    /// Pages only. Empty = the default Todo, Doing, Done columns.
-    var columns: [BoardColumnDef]
-    /// Entries only. Which board column the entry sits in.
-    var columnID: UUID?
+    /// Items only. When this item is a board column: its type. nil = neutral.
+    var columnType: TaskStatus?
     /// Small ordered fields, like rating or coordinates.
     var details: [NodeDetail]
     var dueAt: Date?
@@ -35,8 +33,7 @@ struct Node: Identifiable, Hashable, Sendable {
         body: String? = nil,
         status: TaskStatus? = nil,
         view: PageView? = nil,
-        columns: [BoardColumnDef] = [],
-        columnID: UUID? = nil,
+        columnType: TaskStatus? = nil,
         details: [NodeDetail] = [],
         dueAt: Date? = nil,
         estimateMinutes: Int? = nil,
@@ -51,10 +48,9 @@ struct Node: Identifiable, Hashable, Sendable {
         self.kind = kind
         self.title = title
         self.body = body
-        self.status = kind == .entry ? status : nil
-        self.view = kind == .page ? (view ?? .list) : nil
-        self.columns = kind == .page ? columns : []
-        self.columnID = kind == .entry ? columnID : nil
+        self.status = kind == .item ? status : nil
+        self.view = kind == .item ? (view ?? .list) : nil
+        self.columnType = kind == .item ? columnType : nil
         self.details = details
         self.dueAt = dueAt
         self.estimateMinutes = estimateMinutes
@@ -65,18 +61,15 @@ struct Node: Identifiable, Hashable, Sendable {
     }
 
     var isTask: Bool { status != nil }
+    var isBoard: Bool { view == .board }
 }
 
 enum NodeKind: String, Codable, CaseIterable, Sendable {
-    case page, entry, note
+    case item, note
 
-    /// Reads kinds saved by older builds (folder, list, item, task).
+    /// Reads kinds saved by older builds (page, entry, folder, list, task).
     init(storedValue: String) {
-        switch storedValue {
-        case "page", "folder", "list": self = .page
-        case "note": self = .note
-        default: self = .entry
-        }
+        self = storedValue == "note" ? .note : .item
     }
 }
 
@@ -109,47 +102,18 @@ struct NodeDetail: Codable, Hashable, Sendable {
     var value: String
 }
 
-/// One board column. The `status` is its type: it sets the tint and what counts as finished.
-/// nil = neutral: no tint, holds tasks that are not finished.
-struct BoardColumnDef: Codable, Hashable, Identifiable, Sendable {
-    var id: UUID
-    var title: String
-    var status: TaskStatus?
-
-    init(id: UUID = UUID(), title: String, status: TaskStatus?) {
-        self.id = id
-        self.title = title
-        self.status = status
-    }
-
-    /// Used when a page has no custom columns. Fixed ids so cards stay put.
-    static let defaults: [BoardColumnDef] = [
-        BoardColumnDef(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C001")!, title: "Todo", status: .todo),
-        BoardColumnDef(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C002")!, title: "Doing", status: .doing),
-        BoardColumnDef(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C003")!, title: "Done", status: .done),
-    ]
-
+/// Rules for board column types. `nil` is a neutral column.
+enum ColumnRules {
     /// Typed columns hold their own status. Neutral columns hold anything not finished.
-    func accepts(_ entryStatus: TaskStatus?) -> Bool {
-        if let status { return entryStatus == status }
-        return entryStatus != .done
+    static func accepts(_ columnType: TaskStatus?, _ status: TaskStatus?) -> Bool {
+        if let columnType { return status == columnType }
+        return status != .done
     }
 
-    /// The status a card gets when dropped here. Neutral keeps Todo or Doing, and reopens Done.
-    func statusOnDrop(from current: TaskStatus?) -> TaskStatus {
-        if let status { return status }
+    /// The status a card gets when it lands in a column. Neutral keeps Todo or Doing, and reopens Done.
+    static func statusOnDrop(into columnType: TaskStatus?, from current: TaskStatus?) -> TaskStatus {
+        if let columnType { return columnType }
         if let current, current != .done { return current }
         return .todo
-    }
-
-    /// Which column a task card shows in: its own column if that still fits its status,
-    /// else the first column of that type, else the first column that accepts it, else the first column.
-    static func placement(of entry: Node, in columns: [BoardColumnDef]) -> UUID? {
-        if let own = columns.first(where: { $0.id == entry.columnID }), own.accepts(entry.status) {
-            return own.id
-        }
-        return (columns.first { $0.status != nil && $0.status == entry.status }
-            ?? columns.first { $0.accepts(entry.status) }
-            ?? columns.first)?.id
     }
 }
