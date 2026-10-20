@@ -65,6 +65,8 @@ struct NodeRow: View {
 /// Tap to toggle done. Plain entries become tasks the first time.
 struct StatusCheckbox: View {
     let node: Node
+    /// No status color, for cards in neutral columns.
+    var plain = false
     @Environment(NotesModel.self) private var model
 
     var body: some View {
@@ -73,7 +75,7 @@ struct StatusCheckbox: View {
         } label: {
             Image(systemName: icon)
                 .imageScale(.large)
-                .foregroundStyle(node.status.map { AnyShapeStyle($0.tint) } ?? AnyShapeStyle(.secondary))
+                .foregroundStyle(plain ? AnyShapeStyle(.secondary) : node.status.map { AnyShapeStyle($0.tint) } ?? AnyShapeStyle(.secondary))
                 .frame(width: 28)
         }
         .buttonStyle(.plain)

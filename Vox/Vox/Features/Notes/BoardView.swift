@@ -89,16 +89,16 @@ private struct BoardColumn: View {
     @State private var isTargeted = false
 
     var body: some View {
-        let tint = column.status.tint
+        let tint = column.status?.tint
 
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Circle().fill(tint).frame(width: 9, height: 9)
+                Circle().fill(tint ?? .secondary).frame(width: 9, height: 9)
                 Text(column.title).font(.headline)
                 Spacer()
                 Text("\(tasks.count)")
                     .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(tint)
+                    .foregroundStyle(tint ?? .secondary)
             }
 
             ScrollView {
@@ -118,7 +118,8 @@ private struct BoardColumn: View {
         }
         .padding(16)
         .frame(maxHeight: .infinity, alignment: .top)
-        .glassEffect(.regular.tint(tint.opacity(isTargeted ? 0.35 : 0.14)), in: .rect(cornerRadius: 26))
+        // The column stays neutral glass. Only the cards carry the tint.
+        .glassEffect(.regular.tint(isTargeted ? .white.opacity(0.12) : nil), in: .rect(cornerRadius: 26))
         .dropDestination(for: String.self) { ids, _ in
             for id in ids.compactMap(UUID.init(uuidString:)) {
                 if let task = model.node(id: id) { model.move(task, to: column) }
@@ -137,7 +138,8 @@ private struct BoardColumn: View {
 
 private struct TaskCard: View {
     let task: Node
-    let tint: Color
+    /// The column's tint. nil in neutral columns.
+    let tint: Color?
     /// For the "Move to" menu.
     let columns: [BoardColumnDef]
     let subpageName: String?
@@ -146,7 +148,7 @@ private struct TaskCard: View {
     var body: some View {
         NavigationLink(value: task) {
             HStack(alignment: .top, spacing: 10) {
-                StatusCheckbox(node: task)
+                StatusCheckbox(node: task, plain: tint == nil)
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(task.title)
@@ -173,11 +175,11 @@ private struct TaskCard: View {
         .buttonStyle(.plain)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular.tint(tint.opacity(0.08)).interactive(), in: .rect(cornerRadius: 16))
+        .glassEffect(.regular.tint(tint?.opacity(0.32)).interactive(), in: .rect(cornerRadius: 16))
         .draggable(task.id.uuidString) {
             Text(task.title)
                 .padding(10)
-                .glassEffect(.regular.tint(tint.opacity(0.2)), in: .rect(cornerRadius: 12))
+                .glassEffect(.regular.tint(tint?.opacity(0.32)), in: .rect(cornerRadius: 12))
         }
         .contextMenu {
             ForEach(columns) { column in
@@ -201,14 +203,15 @@ struct BoardColumnsEditor: View {
                 Section {
                     ForEach($columns) { $column in
                         HStack(spacing: 12) {
-                            Circle().fill(column.status.tint).frame(width: 10, height: 10)
+                            Circle().fill(column.status?.tint ?? .secondary).frame(width: 10, height: 10)
                             TextField("Column name", text: $column.title)
                             Picker("Type", selection: $column.status) {
-                                ForEach(TaskStatus.allCases, id: \.self) { Text($0.label).tag($0) }
+                                Text("Neutral").tag(TaskStatus?.none)
+                                ForEach(TaskStatus.allCases, id: \.self) { Text($0.label).tag(TaskStatus?.some($0)) }
                             }
                             .labelsHidden()
                             .pickerStyle(.menu)
-                            .tint(column.status.tint)
+                            .tint(column.status?.tint ?? .secondary)
                         }
                         .deleteDisabled(columns.count == 1)
                     }
@@ -216,10 +219,10 @@ struct BoardColumnsEditor: View {
                     .onDelete { columns.remove(atOffsets: $0) }
 
                     Button("Add column", systemImage: "plus") {
-                        columns.append(BoardColumnDef(title: "", status: .todo))
+                        columns.append(BoardColumnDef(title: "", status: nil))
                     }
                 } footer: {
-                    Text("The type sets the tint, and Done-type columns count as finished.")
+                    Text("The type sets the card color. Done columns count as finished. Neutral columns stay uncolored and hold unfinished tasks.")
                 }
             }
             .environment(\.editMode, .constant(.active))
@@ -241,7 +244,7 @@ struct BoardColumnsEditor: View {
         let cleaned = columns.map { column in
             var column = column
             column.title = column.title.trimmingCharacters(in: .whitespaces)
-            if column.title.isEmpty { column.title = column.status.label }
+            if column.title.isEmpty { column.title = column.status?.label ?? "Column" }
             return column
         }
         // Read the page fresh so we don't overwrite changes made while the sheet was open.

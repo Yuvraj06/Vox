@@ -61,11 +61,11 @@ final class NotesModel {
         save(changed)
     }
 
-    /// Drop a card into a column: it takes that column and the column's status.
+    /// Drop a card into a column: it takes that column, and the column's status if it has one.
     func move(_ entry: Node, to column: BoardColumnDef) {
         var changed = entry
         changed.columnID = column.id
-        changed.status = column.status
+        changed.status = column.statusOnDrop(from: entry.status)
         save(changed)
     }
 

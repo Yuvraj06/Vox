@@ -168,4 +168,27 @@ struct NodeStoreTests {
         #expect(saved.columnID == shipped.id)
         #expect(saved.status == .done)
     }
+
+    @Test func neutralColumns() throws {
+        let ideas = BoardColumnDef(title: "Ideas", status: nil)
+        let doing = BoardColumnDef(title: "Doing", status: .doing)
+        let done = BoardColumnDef(title: "Done", status: .done)
+        let columns = [ideas, doing, done]
+
+        // A todo task with no column lands in the neutral column, since no Todo column exists.
+        #expect(BoardColumnDef.placement(of: Node(kind: .entry, title: "A", status: .todo), in: columns) == ideas.id)
+        // A doing task prefers the typed Doing column over neutral.
+        #expect(BoardColumnDef.placement(of: Node(kind: .entry, title: "B", status: .doing), in: columns) == doing.id)
+        // A doing task placed in neutral stays there.
+        let parked = Node(kind: .entry, title: "C", status: .doing, columnID: ideas.id)
+        #expect(BoardColumnDef.placement(of: parked, in: columns) == ideas.id)
+        // Ticked done while in neutral: moves to Done.
+        let ticked = Node(kind: .entry, title: "D", status: .done, columnID: ideas.id)
+        #expect(BoardColumnDef.placement(of: ticked, in: columns) == done.id)
+
+        // Dropping into neutral keeps Todo or Doing, and reopens Done.
+        #expect(ideas.statusOnDrop(from: .doing) == .doing)
+        #expect(ideas.statusOnDrop(from: .done) == .todo)
+        #expect(done.statusOnDrop(from: .todo) == .done)
+    }
 }

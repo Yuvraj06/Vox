@@ -110,12 +110,13 @@ struct NodeDetail: Codable, Hashable, Sendable {
 }
 
 /// One board column. The `status` is its type: it sets the tint and what counts as finished.
+/// nil = neutral: no tint, holds tasks that are not finished.
 struct BoardColumnDef: Codable, Hashable, Identifiable, Sendable {
     var id: UUID
     var title: String
-    var status: TaskStatus
+    var status: TaskStatus?
 
-    init(id: UUID = UUID(), title: String, status: TaskStatus) {
+    init(id: UUID = UUID(), title: String, status: TaskStatus?) {
         self.id = id
         self.title = title
         self.status = status
@@ -128,12 +129,27 @@ struct BoardColumnDef: Codable, Hashable, Identifiable, Sendable {
         BoardColumnDef(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C003")!, title: "Done", status: .done),
     ]
 
-    /// Which column a task card shows in.
-    /// Its own column if that column's type still matches its status, else the first column of that type, else the first column.
+    /// Typed columns hold their own status. Neutral columns hold anything not finished.
+    func accepts(_ entryStatus: TaskStatus?) -> Bool {
+        if let status { return entryStatus == status }
+        return entryStatus != .done
+    }
+
+    /// The status a card gets when dropped here. Neutral keeps Todo or Doing, and reopens Done.
+    func statusOnDrop(from current: TaskStatus?) -> TaskStatus {
+        if let status { return status }
+        if let current, current != .done { return current }
+        return .todo
+    }
+
+    /// Which column a task card shows in: its own column if that still fits its status,
+    /// else the first column of that type, else the first column that accepts it, else the first column.
     static func placement(of entry: Node, in columns: [BoardColumnDef]) -> UUID? {
-        if let own = columns.first(where: { $0.id == entry.columnID }), own.status == entry.status {
+        if let own = columns.first(where: { $0.id == entry.columnID }), own.accepts(entry.status) {
             return own.id
         }
-        return (columns.first { $0.status == entry.status } ?? columns.first)?.id
+        return (columns.first { $0.status != nil && $0.status == entry.status }
+            ?? columns.first { $0.accepts(entry.status) }
+            ?? columns.first)?.id
     }
 }

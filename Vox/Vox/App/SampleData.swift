@@ -10,7 +10,7 @@ enum SampleData {
             // A project board with sections and a task that has sub-tasks.
             var orbit = try store.create(kind: .page, title: "Orbit", parentID: nil, view: .board)
             orbit.columns = [
-                BoardColumnDef(title: "Ideas", status: .todo),
+                BoardColumnDef(title: "Ideas", status: nil),
                 BoardColumnDef(title: "Building", status: .doing),
                 BoardColumnDef(title: "Testing", status: .doing),
                 BoardColumnDef(title: "Shipped", status: .done),
