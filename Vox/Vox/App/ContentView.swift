@@ -23,6 +23,8 @@ struct ContentView: View {
                     }
                 }
         }
+        // One background for every screen. It stays still and blurs as you go deeper.
+        .background { SceneryBackground(depth: path.count) }
         // Dark mode keeps text readable on glass over the scenery.
         .preferredColorScheme(.dark)
         #if DEBUG
@@ -30,11 +32,16 @@ struct ContentView: View {
         .onAppear {
             let args = ProcessInfo.processInfo.arguments
             guard let flag = args.firstIndex(of: "-open"), args.indices.contains(flag + 1) else { return }
-            var parentID: UUID?
-            for title in args[flag + 1].split(separator: "/") {
-                guard let next = model.children(of: parentID).first(where: { $0.title == title }) else { break }
-                path.append(next)
-                parentID = next.id
+            // `-openSlowly` pushes one screen per second, to watch the transitions.
+            let slow = args.contains("-openSlowly")
+            Task {
+                var parentID: UUID?
+                for title in args[flag + 1].split(separator: "/") {
+                    guard let next = model.children(of: parentID).first(where: { $0.title == title }) else { break }
+                    if slow { try? await Task.sleep(for: .seconds(1)) }
+                    path.append(next)
+                    parentID = next.id
+                }
             }
         }
         #endif

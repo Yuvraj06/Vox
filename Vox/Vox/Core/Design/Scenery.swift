@@ -3,8 +3,14 @@ import UIKit
 
 /// Full-screen scenic background. Uses the "Scenery" image from Assets if it exists,
 /// otherwise a calm mountain scene drawn in code.
+/// It sits behind the whole navigation stack, so it stays still while screens slide.
+/// `depth` is how many screens deep you are: each level blurs and dims it a bit more.
 struct SceneryBackground: View {
+    var depth = 0
     private static let hasPhoto = UIImage(named: "Scenery") != nil
+
+    private var blur: CGFloat { min(CGFloat(depth) * 7, 28) }
+    private var dim: Double { min(Double(depth) * 0.08, 0.32) }
 
     var body: some View {
         GeometryReader { geo in
@@ -18,7 +24,11 @@ struct SceneryBackground: View {
                 }
             }
             .frame(width: geo.size.width, height: geo.size.height)
+            .blur(radius: blur)
+            // Zoom in slightly while blurred so the soft edges stay off screen.
+            .scaleEffect(1 + blur / 200)
             .clipped()
+            .overlay { Color.black.opacity(dim) }
             // Darken the top and bottom a little so text on glass stays readable.
             .overlay {
                 LinearGradient(
@@ -29,6 +39,7 @@ struct SceneryBackground: View {
             }
         }
         .ignoresSafeArea()
+        .animation(.easeInOut(duration: 0.4), value: depth)
     }
 }
 
@@ -105,10 +116,10 @@ struct DrawnMountains: View {
 }
 
 extension View {
-    /// Puts the scenery behind a screen and hides the default list background.
-    func sceneryBackground() -> some View {
+    /// Makes a screen see-through, so the shared scenery behind the navigation stack shows.
+    func overScenery() -> some View {
         scrollContentBackground(.hidden)
-            .background { SceneryBackground() }
+            .containerBackground(.clear, for: .navigation)
     }
 
     /// A list row drawn as a floating glass card. `indent` shifts it right for tree levels.

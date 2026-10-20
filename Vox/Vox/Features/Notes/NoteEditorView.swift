@@ -19,7 +19,7 @@ struct NoteEditorView: View {
         .padding(20)
         .glassEffect(.regular, in: .rect(cornerRadius: 28))
         .padding(16)
-        .sceneryBackground()
+        .overScenery()
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: load)
         .onDisappear(perform: save)

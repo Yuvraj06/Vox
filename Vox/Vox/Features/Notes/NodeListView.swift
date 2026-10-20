@@ -25,7 +25,7 @@ struct NodeListView: View {
                 list(item)
             }
         }
-        .sceneryBackground()
+        .overScenery()
         .navigationTitle(item?.title ?? "Vox")
         .toolbar {
             if let item {
