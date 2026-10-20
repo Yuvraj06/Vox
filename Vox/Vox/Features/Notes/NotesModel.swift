@@ -25,7 +25,19 @@ final class NotesModel {
         return (try? store.children(of: parentID)) ?? []
     }
 
+    /// Every task below `id`, at any depth. Used by the board.
+    func tasks(under id: UUID) -> [Node] {
+        _ = revision
+        return ((try? store.descendants(of: id)) ?? []).filter { $0.kind == .task }
+    }
+
     // MARK: Writes
+
+    func setView(_ node: Node, _ view: FolderView) {
+        var changed = node
+        changed.view = view
+        save(changed)
+    }
 
     func add(kind: NodeKind, title: String, parentID: UUID?) {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)

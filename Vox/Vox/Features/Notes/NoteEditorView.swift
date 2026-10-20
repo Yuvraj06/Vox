@@ -12,10 +12,14 @@ struct NoteEditorView: View {
         VStack(alignment: .leading, spacing: 8) {
             TextField("Title", text: $title)
                 .font(.title2.bold())
+            Divider()
             TextEditor(text: $text)
                 .scrollContentBackground(.hidden)
         }
-        .padding()
+        .padding(20)
+        .glassEffect(.regular, in: .rect(cornerRadius: 28))
+        .padding(16)
+        .sceneryBackground()
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: load)
         .onDisappear(perform: save)

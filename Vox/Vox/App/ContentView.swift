@@ -4,11 +4,12 @@ import SwiftUI
 struct ContentView: View {
     @Environment(NotesModel.self) private var model
     @State private var showSpeechTest = false
+    @State private var path: [Node] = []
 
     var body: some View {
         @Bindable var model = model
 
-        NavigationStack {
+        NavigationStack(path: $path) {
             NodeListView(parentID: nil)
                 .navigationDestination(for: Node.self) { node in
                     if node.kind == .note {
@@ -23,6 +24,17 @@ struct ContentView: View {
                     }
                 }
         }
+        // Dark mode keeps text readable on glass over the scenery.
+        .preferredColorScheme(.dark)
+        #if DEBUG
+        // Debug only: `-openFirstNode` jumps straight into the first item, handy for screenshots.
+        .onAppear {
+            if ProcessInfo.processInfo.arguments.contains("-openFirstNode"),
+               let first = model.children(of: nil).first {
+                path = [first]
+            }
+        }
+        #endif
         .sheet(isPresented: $showSpeechTest) { SpeechTestView() }
         .alert(
             "Something went wrong",

@@ -12,7 +12,11 @@ import SwiftUI
 
     private static func makeNodeStore() -> any NodeStore {
         do {
-            return try SwiftDataNodeStore.persistent()
+            let store = try SwiftDataNodeStore.persistent()
+            #if DEBUG
+            SampleData.seedIfRequested(store)
+            #endif
+            return store
         } catch {
             fatalError("Could not open the local database: \(error)")
         }
