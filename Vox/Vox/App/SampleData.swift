@@ -8,7 +8,14 @@ enum SampleData {
               (try? store.children(of: nil).isEmpty) == true else { return }
         do {
             // A project board with sections and a task that has sub-tasks.
-            let orbit = try store.create(kind: .page, title: "Orbit", parentID: nil, view: .board)
+            var orbit = try store.create(kind: .page, title: "Orbit", parentID: nil, view: .board)
+            orbit.columns = [
+                BoardColumnDef(title: "Ideas", status: .todo),
+                BoardColumnDef(title: "Building", status: .doing),
+                BoardColumnDef(title: "Testing", status: .doing),
+                BoardColumnDef(title: "Shipped", status: .done),
+            ]
+            try store.update(orbit)
             let frontend = try store.create(kind: .page, title: "Frontend", parentID: orbit.id, view: .checklist)
             let backend = try store.create(kind: .page, title: "Backend", parentID: orbit.id, view: .checklist)
             let hardware = try store.create(kind: .page, title: "Hardware", parentID: orbit.id, view: .checklist)

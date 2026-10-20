@@ -16,6 +16,9 @@ final class NodeEntity {
     var view: String?
     /// JSON array of {key, value}. Matches the `details` jsonb column.
     var detailsJSON: String?
+    /// JSON array of board columns. Matches the `columns` jsonb column.
+    var columnsJSON: String?
+    var columnID: UUID?
     var dueAt: Date?
     var estimateMinutes: Int?
     var position: Double
@@ -33,6 +36,8 @@ final class NodeEntity {
         status = node.status?.rawValue
         view = node.view?.rawValue
         detailsJSON = Self.encode(node.details)
+        columnsJSON = Self.encode(node.columns)
+        columnID = node.columnID
         dueAt = node.dueAt
         estimateMinutes = node.estimateMinutes
         position = node.position
@@ -50,6 +55,8 @@ final class NodeEntity {
         status = node.status?.rawValue
         view = node.view?.rawValue
         detailsJSON = Self.encode(node.details)
+        columnsJSON = Self.encode(node.columns)
+        columnID = node.columnID
         dueAt = node.dueAt
         estimateMinutes = node.estimateMinutes
         position = node.position
@@ -67,6 +74,8 @@ final class NodeEntity {
             body: body,
             status: status.flatMap(TaskStatus.init(rawValue:)),
             view: view.flatMap(PageView.init(rawValue:)),
+            columns: Self.decode(columnsJSON),
+            columnID: columnID,
             details: Self.decode(detailsJSON),
             dueAt: dueAt,
             estimateMinutes: estimateMinutes,
@@ -77,14 +86,15 @@ final class NodeEntity {
         )
     }
 
-    private static func encode(_ details: [NodeDetail]) -> String? {
-        guard !details.isEmpty, let data = try? JSONEncoder().encode(details) else { return nil }
+    /// Empty arrays are stored as nil, like a null jsonb column.
+    private static func encode<T: Encodable>(_ values: [T]) -> String? {
+        guard !values.isEmpty, let data = try? JSONEncoder().encode(values) else { return nil }
         return String(decoding: data, as: UTF8.self)
     }
 
-    private static func decode(_ json: String?) -> [NodeDetail] {
+    private static func decode<T: Decodable>(_ json: String?) -> [T] {
         guard let json else { return [] }
-        return (try? JSONDecoder().decode([NodeDetail].self, from: Data(json.utf8))) ?? []
+        return (try? JSONDecoder().decode([T].self, from: Data(json.utf8))) ?? []
     }
 }
 

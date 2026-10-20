@@ -13,6 +13,10 @@ struct Node: Identifiable, Hashable, Sendable {
     var status: TaskStatus?
     /// Pages only.
     var view: PageView?
+    /// Pages only. Empty = the default Todo, Doing, Done columns.
+    var columns: [BoardColumnDef]
+    /// Entries only. Which board column the entry sits in.
+    var columnID: UUID?
     /// Small ordered fields, like rating or coordinates.
     var details: [NodeDetail]
     var dueAt: Date?
@@ -31,6 +35,8 @@ struct Node: Identifiable, Hashable, Sendable {
         body: String? = nil,
         status: TaskStatus? = nil,
         view: PageView? = nil,
+        columns: [BoardColumnDef] = [],
+        columnID: UUID? = nil,
         details: [NodeDetail] = [],
         dueAt: Date? = nil,
         estimateMinutes: Int? = nil,
@@ -47,6 +53,8 @@ struct Node: Identifiable, Hashable, Sendable {
         self.body = body
         self.status = kind == .entry ? status : nil
         self.view = kind == .page ? (view ?? .list) : nil
+        self.columns = kind == .page ? columns : []
+        self.columnID = kind == .entry ? columnID : nil
         self.details = details
         self.dueAt = dueAt
         self.estimateMinutes = estimateMinutes
@@ -99,4 +107,33 @@ enum PageView: String, Codable, CaseIterable, Sendable {
 struct NodeDetail: Codable, Hashable, Sendable {
     var key: String
     var value: String
+}
+
+/// One board column. The `status` is its type: it sets the tint and what counts as finished.
+struct BoardColumnDef: Codable, Hashable, Identifiable, Sendable {
+    var id: UUID
+    var title: String
+    var status: TaskStatus
+
+    init(id: UUID = UUID(), title: String, status: TaskStatus) {
+        self.id = id
+        self.title = title
+        self.status = status
+    }
+
+    /// Used when a page has no custom columns. Fixed ids so cards stay put.
+    static let defaults: [BoardColumnDef] = [
+        BoardColumnDef(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C001")!, title: "Todo", status: .todo),
+        BoardColumnDef(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C002")!, title: "Doing", status: .doing),
+        BoardColumnDef(id: UUID(uuidString: "00000000-0000-0000-0000-00000000C003")!, title: "Done", status: .done),
+    ]
+
+    /// Which column a task card shows in.
+    /// Its own column if that column's type still matches its status, else the first column of that type, else the first column.
+    static func placement(of entry: Node, in columns: [BoardColumnDef]) -> UUID? {
+        if let own = columns.first(where: { $0.id == entry.columnID }), own.status == entry.status {
+            return own.id
+        }
+        return (columns.first { $0.status == entry.status } ?? columns.first)?.id
+    }
 }

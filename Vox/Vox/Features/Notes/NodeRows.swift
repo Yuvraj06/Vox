@@ -73,7 +73,7 @@ struct StatusCheckbox: View {
         } label: {
             Image(systemName: icon)
                 .imageScale(.large)
-                .foregroundStyle(node.status == .done ? .green : .secondary)
+                .foregroundStyle(node.status.map { AnyShapeStyle($0.tint) } ?? AnyShapeStyle(.secondary))
                 .frame(width: 28)
         }
         .buttonStyle(.plain)
@@ -94,8 +94,8 @@ struct DoingBadge: View {
             .font(.caption.bold())
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
-            .background(.orange.opacity(0.2), in: .capsule)
-            .foregroundStyle(.orange)
+            .background(TaskStatus.doing.tint.opacity(0.2), in: .capsule)
+            .foregroundStyle(TaskStatus.doing.tint)
     }
 }
 

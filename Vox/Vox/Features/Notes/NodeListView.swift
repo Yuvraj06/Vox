@@ -7,6 +7,7 @@ struct NodeListView: View {
 
     @State private var prompt: NodePrompt?
     @State private var boardFilter: UUID?
+    @State private var editingColumns = false
 
     var body: some View {
         let page = parentID.flatMap { model.node(id: $0) }
@@ -33,6 +34,9 @@ struct NodeListView: View {
                                 Label(option.label, systemImage: option.icon)
                             }
                         }
+                        if view == .board {
+                            Button("Edit columns", systemImage: "slider.horizontal.3") { editingColumns = true }
+                        }
                     }
                 }
             }
@@ -46,6 +50,9 @@ struct NodeListView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $editingColumns) {
+            if let page { BoardColumnsEditor(page: page) }
         }
         .nodePrompt($prompt) { kind, title in
             // Checklists and boards are for tasks, so new items start as Todo there.

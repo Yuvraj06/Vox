@@ -1,16 +1,19 @@
 import SwiftUI
 
-/// Task entries in a page and its sub-pages, in Todo / Doing / Done columns.
-/// Drag a card to another column to change its status.
+/// Task entries in a page and its sub-pages, in the page's own columns.
+/// Drag a card to another column to move it there.
 struct BoardView: View {
     let page: Node
     /// Sub-page to filter by. nil shows every task under `page`.
     @Binding var filterID: UUID?
     @Environment(NotesModel.self) private var model
+    @State private var editingColumns = false
 
     var body: some View {
         let subpages = model.children(of: page.id).filter { $0.kind == .page }
         let tasks = model.boardEntries(under: filterID ?? page.id)
+        let columns = model.columns(of: page)
+        let placed = Dictionary(grouping: tasks) { BoardColumnDef.placement(of: $0, in: columns) }
 
         VStack(spacing: 14) {
             if !subpages.isEmpty {
@@ -19,14 +22,11 @@ struct BoardView: View {
 
             ScrollView(.horizontal) {
                 HStack(alignment: .top, spacing: 14) {
-                    ForEach(TaskStatus.allCases, id: \.self) { status in
-                        BoardColumn(
-                            page: page,
-                            status: status,
-                            tasks: tasks.filter { $0.status == status }
-                        )
-                        .containerRelativeFrame(.horizontal) { width, _ in width * 0.8 }
+                    ForEach(columns) { column in
+                        BoardColumn(page: page, column: column, allColumns: columns, tasks: placed[column.id] ?? [])
+                            .containerRelativeFrame(.horizontal) { width, _ in width * 0.8 }
                     }
+                    addColumnButton
                 }
                 .scrollTargetLayout()
                 .padding(.horizontal, 16)
@@ -35,6 +35,22 @@ struct BoardView: View {
             .scrollIndicators(.hidden)
         }
         .padding(.top, 8)
+        .sheet(isPresented: $editingColumns) { BoardColumnsEditor(page: page) }
+    }
+
+    private var addColumnButton: some View {
+        Button {
+            editingColumns = true
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: "slider.horizontal.3").font(.title2)
+                Text("Edit columns").font(.subheadline.weight(.medium))
+            }
+            .foregroundStyle(.secondary)
+            .frame(width: 130, height: 160)
+        }
+        .buttonStyle(.plain)
+        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 26))
     }
 
     private func filterBar(_ subpages: [Node]) -> some View {
@@ -55,7 +71,9 @@ struct BoardView: View {
     @ViewBuilder
     private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
         if selected {
-            Button(title, action: action).buttonStyle(.glassProminent)
+            Button(title, action: action)
+                .buttonStyle(.glassProminent)
+                .tint(TaskStatus.doing.tint.opacity(0.8))
         } else {
             Button(title, action: action).buttonStyle(.glass)
         }
@@ -64,25 +82,29 @@ struct BoardView: View {
 
 private struct BoardColumn: View {
     let page: Node
-    let status: TaskStatus
+    let column: BoardColumnDef
+    let allColumns: [BoardColumnDef]
     let tasks: [Node]
     @Environment(NotesModel.self) private var model
     @State private var isTargeted = false
 
     var body: some View {
+        let tint = column.status.tint
+
         VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(status.label).font(.headline)
+            HStack(spacing: 8) {
+                Circle().fill(tint).frame(width: 9, height: 9)
+                Text(column.title).font(.headline)
                 Spacer()
                 Text("\(tasks.count)")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                    .font(.subheadline.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(tint)
             }
 
             ScrollView {
                 LazyVStack(spacing: 10) {
                     ForEach(tasks) { task in
-                        TaskCard(task: task, subpageName: subpageName(of: task))
+                        TaskCard(task: task, tint: tint, columns: allColumns, subpageName: subpageName(of: task))
                     }
                     if tasks.isEmpty {
                         Text("Drop tasks here")
@@ -96,15 +118,10 @@ private struct BoardColumn: View {
         }
         .padding(16)
         .frame(maxHeight: .infinity, alignment: .top)
-        .glassEffect(
-            isTargeted ? .regular.tint(.white.opacity(0.2)) : .regular,
-            in: .rect(cornerRadius: 26)
-        )
+        .glassEffect(.regular.tint(tint.opacity(isTargeted ? 0.35 : 0.14)), in: .rect(cornerRadius: 26))
         .dropDestination(for: String.self) { ids, _ in
             for id in ids.compactMap(UUID.init(uuidString:)) {
-                if let task = model.node(id: id), task.status != status {
-                    model.setStatus(task, status)
-                }
+                if let task = model.node(id: id) { model.move(task, to: column) }
             }
             return true
         } isTargeted: { isTargeted = $0 }
@@ -120,6 +137,9 @@ private struct BoardColumn: View {
 
 private struct TaskCard: View {
     let task: Node
+    let tint: Color
+    /// For the "Move to" menu.
+    let columns: [BoardColumnDef]
     let subpageName: String?
     @Environment(NotesModel.self) private var model
 
@@ -153,17 +173,79 @@ private struct TaskCard: View {
         .buttonStyle(.plain)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 16))
+        .glassEffect(.regular.tint(tint.opacity(0.08)).interactive(), in: .rect(cornerRadius: 16))
         .draggable(task.id.uuidString) {
             Text(task.title)
                 .padding(10)
-                .glassEffect(.regular, in: .rect(cornerRadius: 12))
+                .glassEffect(.regular.tint(tint.opacity(0.2)), in: .rect(cornerRadius: 12))
         }
         .contextMenu {
-            ForEach(TaskStatus.allCases.filter { $0 != task.status }, id: \.self) { status in
-                Button("Move to \(status.label)") { model.setStatus(task, status) }
+            ForEach(columns) { column in
+                Button("Move to \(column.title)") { model.move(task, to: column) }
             }
             Button("Delete", systemImage: "trash", role: .destructive) { model.delete([task.id]) }
         }
+    }
+}
+
+/// Add, rename, retype, reorder and remove a board's columns.
+struct BoardColumnsEditor: View {
+    let page: Node
+    @Environment(NotesModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    @State private var columns: [BoardColumnDef] = []
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach($columns) { $column in
+                        HStack(spacing: 12) {
+                            Circle().fill(column.status.tint).frame(width: 10, height: 10)
+                            TextField("Column name", text: $column.title)
+                            Picker("Type", selection: $column.status) {
+                                ForEach(TaskStatus.allCases, id: \.self) { Text($0.label).tag($0) }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .tint(column.status.tint)
+                        }
+                        .deleteDisabled(columns.count == 1)
+                    }
+                    .onMove { columns.move(fromOffsets: $0, toOffset: $1) }
+                    .onDelete { columns.remove(atOffsets: $0) }
+
+                    Button("Add column", systemImage: "plus") {
+                        columns.append(BoardColumnDef(title: "", status: .todo))
+                    }
+                } footer: {
+                    Text("The type sets the tint, and Done-type columns count as finished.")
+                }
+            }
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle("Columns")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save", action: save)
+                }
+            }
+        }
+        .onAppear { columns = model.columns(of: page) }
+    }
+
+    private func save() {
+        let cleaned = columns.map { column in
+            var column = column
+            column.title = column.title.trimmingCharacters(in: .whitespaces)
+            if column.title.isEmpty { column.title = column.status.label }
+            return column
+        }
+        // Read the page fresh so we don't overwrite changes made while the sheet was open.
+        if let current = model.node(id: page.id) { model.setColumns(current, cleaned) }
+        dismiss()
     }
 }

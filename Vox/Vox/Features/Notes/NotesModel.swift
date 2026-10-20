@@ -49,6 +49,26 @@ final class NotesModel {
 
     // MARK: Writes
 
+    /// A page's board columns, or the defaults if it has none yet.
+    func columns(of page: Node) -> [BoardColumnDef] {
+        page.columns.isEmpty ? BoardColumnDef.defaults : page.columns
+    }
+
+    func setColumns(_ page: Node, _ columns: [BoardColumnDef]) {
+        guard !columns.isEmpty else { return }
+        var changed = page
+        changed.columns = columns
+        save(changed)
+    }
+
+    /// Drop a card into a column: it takes that column and the column's status.
+    func move(_ entry: Node, to column: BoardColumnDef) {
+        var changed = entry
+        changed.columnID = column.id
+        changed.status = column.status
+        save(changed)
+    }
+
     func setView(_ page: Node, _ view: PageView) {
         var changed = page
         changed.view = view

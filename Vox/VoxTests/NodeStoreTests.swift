@@ -130,4 +130,42 @@ struct NodeStoreTests {
         model.toggleDone(line)
         #expect(try store.node(id: line.id)?.status == .done)
     }
+
+    @Test func cardPlacementFollowsColumnAndStatus() {
+        let ideas = BoardColumnDef(title: "Ideas", status: .todo)
+        let building = BoardColumnDef(title: "Building", status: .doing)
+        let testing = BoardColumnDef(title: "Testing", status: .doing)
+        let shipped = BoardColumnDef(title: "Shipped", status: .done)
+        let columns = [ideas, building, testing, shipped]
+
+        // Own column wins while its type matches the status.
+        let inTesting = Node(kind: .entry, title: "A", status: .doing, columnID: testing.id)
+        #expect(BoardColumnDef.placement(of: inTesting, in: columns) == testing.id)
+
+        // No column yet: first column of that type.
+        let fresh = Node(kind: .entry, title: "B", status: .doing)
+        #expect(BoardColumnDef.placement(of: fresh, in: columns) == building.id)
+
+        // Ticked done from a checkbox: leaves Testing, lands in the Done-type column.
+        let ticked = Node(kind: .entry, title: "C", status: .done, columnID: testing.id)
+        #expect(BoardColumnDef.placement(of: ticked, in: columns) == shipped.id)
+
+        // Its column was deleted and no column has its type: first column.
+        let orphan = Node(kind: .entry, title: "D", status: .done, columnID: UUID())
+        #expect(BoardColumnDef.placement(of: orphan, in: [ideas, building]) == ideas.id)
+    }
+
+    @Test func movingCardSetsColumnAndStatus() throws {
+        let model = NotesModel(store: store)
+        let page = try store.create(kind: .page, title: "Orbit", parentID: nil, view: .board)
+        let shipped = BoardColumnDef(title: "Shipped", status: .done)
+        model.setColumns(page, [BoardColumnDef(title: "Ideas", status: .todo), shipped])
+        #expect(try store.node(id: page.id)?.columns.map(\.title) == ["Ideas", "Shipped"])
+
+        let task = try store.create(kind: .entry, title: "Deploy", parentID: page.id, status: .todo)
+        model.move(task, to: shipped)
+        let saved = try #require(try store.node(id: task.id))
+        #expect(saved.columnID == shipped.id)
+        #expect(saved.status == .done)
+    }
 }
