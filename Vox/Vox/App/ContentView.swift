@@ -5,6 +5,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(NotesModel.self) private var model
     @Environment(CaptureModel.self) private var capture
+    @Environment(RemindersModel.self) private var reminders
     @State private var path: [Route] = []
 
     var body: some View {
@@ -12,7 +13,6 @@ struct ContentView: View {
 
         NavigationStack(path: $path) {
             HomeView()
-                .thinkingButton()
                 .navigationDestination(for: Route.self) { route in
                     switch route {
                     case .node(let node) where node.kind == .note: NoteEditorView(nodeID: node.id).thinkingButton()
@@ -67,6 +67,15 @@ struct ContentView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(model.errorMessage ?? "")
+        }
+        // A reminder that could not go on the system clock, like when notifications are off for Vox.
+        .alert(
+            "Reminder not set",
+            isPresented: Binding(get: { reminders.errorMessage != nil }, set: { if !$0 { reminders.errorMessage = nil } })
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(reminders.errorMessage ?? "")
         }
     }
 }

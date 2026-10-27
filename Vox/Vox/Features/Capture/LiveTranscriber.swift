@@ -22,8 +22,10 @@ final class LiveTranscriber {
     /// Mic loudness from 0 to 1, for the glow ring.
     private(set) var level: Float = 0
 
-    private var finalText = ""
-    private var partialText = ""
+    /// Words that are settled.
+    private(set) var finalText = ""
+    /// Words still being worked out. They can still change.
+    private(set) var partialText = ""
     private var locale: Locale?
     private let engine = AVAudioEngine()
     private var analyzer: SpeechAnalyzer?

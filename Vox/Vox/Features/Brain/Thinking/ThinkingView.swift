@@ -67,26 +67,33 @@ private struct ThinkingButton: ViewModifier {
             .toolbar {
                 ToolbarSpacer(.fixed, placement: .topBarTrailing)
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { showing = true } label: {
-                        Image(systemName: "brain")
-                            .symbolEffect(.pulse, isActive: queue.activeCount > 0)
-                            .overlay(alignment: .topTrailing) {
-                                if queue.waitingCount > 0 {
-                                    Text("\(queue.waitingCount)")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundStyle(.black)
-                                        .frame(minWidth: 15, minHeight: 15)
-                                        .background(TaskStatus.doing.tint, in: .circle)
-                                        .offset(x: 9, y: -8)
-                                }
-                            }
-                    }
-                    .accessibilityLabel("Thinking")
-                    .accessibilityValue(queue.waitingCount > 0 ? "\(queue.waitingCount) waiting" : "")
+                    Button { showing = true } label: { ThinkingIcon() }
+                        .accessibilityLabel("Thinking")
+                        .accessibilityValue(queue.waitingCount > 0 ? "\(queue.waitingCount) waiting" : "")
                 }
             }
             .sheet(isPresented: $showing) {
                 ThinkingView()
+            }
+    }
+}
+
+/// The brain. Pulses while something is being checked, with an amber count of how many wait for a choice.
+struct ThinkingIcon: View {
+    @Environment(ThinkingQueue.self) private var queue
+
+    var body: some View {
+        Image(systemName: "brain")
+            .symbolEffect(.pulse, isActive: queue.activeCount > 0)
+            .overlay(alignment: .topTrailing) {
+                if queue.waitingCount > 0 {
+                    Text("\(queue.waitingCount)")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.black)
+                        .frame(minWidth: 15, minHeight: 15)
+                        .background(TaskStatus.doing.tint, in: .circle)
+                        .offset(x: 9, y: -8)
+                }
             }
     }
 }

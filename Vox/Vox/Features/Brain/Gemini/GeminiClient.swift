@@ -37,7 +37,25 @@ struct GeminiClient {
         }
     }
 
+    /// The exact time a command asks for. Only used when Swift can't read the time itself.
+    func time(prompt: String) async throws -> TimeParts {
+        let text = try await generate(system: TimeAI.instructions, prompt: prompt, schema: TimeParts.schema, thinkingLevel: false)
+        guard let json = text.data(using: .utf8), let parts = try? JSONDecoder().decode(TimeParts.self, from: json) else {
+            throw Failure.badReply
+        }
+        return parts
+    }
+
     private func send(_ prompt: String, thinkingLevel: Bool) async throws -> [BrainAction] {
+        let text = try await generate(system: BrainInstructions.gemini, prompt: prompt, schema: Self.schema, thinkingLevel: thinkingLevel)
+        guard let json = text.data(using: .utf8),
+              let plan = try? JSONDecoder().decode(BrainPlan.self, from: json)
+        else { throw Failure.badReply }
+        return plan.actions
+    }
+
+    /// One request. Returns the reply's text, which follows `schema`.
+    private func generate(system: String, prompt: String, schema: [String: Any], thinkingLevel: Bool) async throws -> String {
         let escapedModel = model.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? model
         let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models/\(escapedModel):generateContent")!
         var request = URLRequest(url: url, timeoutInterval: 30)
@@ -47,13 +65,13 @@ struct GeminiClient {
 
         var config: [String: Any] = [
             "responseMimeType": "application/json",
-            "responseSchema": Self.schema,
+            "responseSchema": schema,
             "temperature": 0,
         ]
         // Less thinking means a faster answer, which matters for the 3 second window.
         if thinkingLevel { config["thinkingConfig"] = ["thinkingLevel": "low"] }
         let body: [String: Any] = [
-            "systemInstruction": ["parts": [["text": BrainInstructions.gemini]]],
+            "systemInstruction": ["parts": [["text": system]]],
             "contents": [["role": "user", "parts": [["text": prompt]]]],
             "generationConfig": config,
         ]
@@ -62,13 +80,13 @@ struct GeminiClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else { throw Failure.http(status, Self.errorMessage(in: data)) }
-        return try Self.actions(in: data)
+        return try Self.text(in: data)
     }
 
     // MARK: Reply
 
-    /// Reads candidates[0].content.parts[].text, skipping thought parts, and decodes the plan from it.
-    private static func actions(in data: Data) throws -> [BrainAction] {
+    /// Reads candidates[0].content.parts[].text, skipping thought parts.
+    private static func text(in data: Data) throws -> String {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let candidate = (root["candidates"] as? [[String: Any]])?.first,
               let parts = (candidate["content"] as? [String: Any])?["parts"] as? [[String: Any]]
@@ -77,10 +95,8 @@ struct GeminiClient {
             .filter { ($0["thought"] as? Bool) != true }
             .compactMap { $0["text"] as? String }
             .joined()
-        guard let json = text.data(using: .utf8),
-              let plan = try? JSONDecoder().decode(BrainPlan.self, from: json)
-        else { throw Failure.badReply }
-        return plan.actions
+        guard !text.isEmpty else { throw Failure.badReply }
+        return text
     }
 
     private static func errorMessage(in data: Data) -> String {

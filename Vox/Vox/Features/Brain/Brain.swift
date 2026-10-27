@@ -91,6 +91,7 @@ final class Brain: CommandRunner {
             let window = apple == nil ? Duration.seconds(30) : Self.geminiWindow
             switch await Self.first(geminiTask, within: window) {
             case .success(let actions)?:
+                let actions = await resolveTimes(actions, text: text)
                 if let outcome = outcome(for: actions, text: text, context: context, source: "Gemini", gemini: nil, needsCheck: { _ in false }) {
                     apple?.cancel()
                     return outcome
@@ -107,6 +108,7 @@ final class Brain: CommandRunner {
 
         switch await apple.value {
         case .actions(let actions):
+            let actions = await resolveTimes(actions, text: text)
             let outcome = outcome(for: actions, text: text, context: context, source: "On device", gemini: lateGemini) { result in
                 lateGemini != nil || actions.count > 2 || result.guessedRef || result.maybeDuplicate
             }
@@ -144,6 +146,27 @@ final class Brain: CommandRunner {
             // A ref points at nothing. A careful look can search for it.
             return nil
         }
+    }
+
+    /// Reminders and deadlines get their time from the user's words when the model missed it.
+    /// If Swift still can't read a time, the model works out the exact date as a last try.
+    private func resolveTimes(_ actions: [BrainAction], text: String) async -> [BrainAction] {
+        var actions = PlanRepair.timesFromWords(actions, command: text)
+        let unread = actions.indices.filter { index in
+            let phrase = actions[index].timePhrase ?? ""
+            switch actions[index].type {
+            case .createReminder: return DatePhrase.firstFire(from: phrase) == nil
+            case .setDue: return DatePhrase.date(from: phrase) == nil
+            default: return false
+            }
+        }
+        // A reminder with no time at all is fine: it becomes a todo. The model says so with found = false.
+        guard !unread.isEmpty, let date = await TimeAI.date(for: text, gemini: gemini?.client) else { return actions }
+        Self.debugLog("time worked out by the model: \(date)")
+        for index in unread {
+            actions[index].timePhrase = DatePhrase.withRepeat(DatePhrase.exact(date), from: text)
+        }
+        return actions
     }
 
     private func startGemini(_ text: String, context: BrainContext) -> GeminiTask? {
@@ -294,7 +317,8 @@ final class Brain: CommandRunner {
                     options: GenerationOptions(samplingMode: .greedy)
                 ).content.actions
             }
-            try judge(job, actions: PlanRepair.all(actions, command: job.transcript, context: context), context: context)
+            let timed = await resolveTimes(actions, text: job.transcript)
+            try judge(job, actions: PlanRepair.all(timed, command: job.transcript, context: context), context: context)
         } catch PlanPreview.Problem.unsupported(let message) {
             job.state = .failed(message)
         } catch is PlanPreview.Problem {

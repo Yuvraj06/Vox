@@ -207,3 +207,39 @@ struct NoTimeReminderTests {
         #expect(try nodes.children(of: list.id).count == 2)
     }
 }
+
+@MainActor
+struct DeadlineNudgeTests {
+    private let due = Date(timeIntervalSince1970: 1_800_000_000)
+    private let hour: TimeInterval = 3600
+
+    @Test func windowIsFourEstimatesWithinLimits() {
+        #expect(DeadlineNudge.window(estimateMinutes: 30) == 2 * hour)
+        #expect(DeadlineNudge.window(estimateMinutes: nil) == 2 * hour)
+        #expect(DeadlineNudge.window(estimateMinutes: 300) == 20 * hour)
+        #expect(DeadlineNudge.window(estimateMinutes: 10) == 2 * hour)
+        #expect(DeadlineNudge.window(estimateMinutes: 5000) == 48 * hour)
+    }
+
+    @Test func nudgesComeCloserTogetherNearTheDeadline() {
+        let node = Node(kind: .item, title: "Orbit API", status: .todo, dueAt: due, estimateMinutes: 30)
+        let nudges = DeadlineNudge.nudges(for: node, now: due.addingTimeInterval(-5 * hour))
+        #expect(nudges.map(\.lead) == [2 * hour, hour, 0.5 * hour, 0])
+        #expect(nudges.map(\.fireAt) == nudges.map { due.addingTimeInterval(-$0.lead) })
+        #expect(nudges.last?.body == "Due now")
+        #expect(Set(nudges.map(\.id)).count == 4)
+    }
+
+    @Test func passedNudgesAreSkipped() {
+        let node = Node(kind: .item, title: "Orbit API", dueAt: due, estimateMinutes: 30)
+        let nudges = DeadlineNudge.nudges(for: node, now: due.addingTimeInterval(-0.75 * hour))
+        #expect(nudges.map(\.lead) == [0.5 * hour, 0])
+    }
+
+    @Test func doneOrPastItemsGetNone() {
+        let done = Node(kind: .item, title: "Shipped", status: .done, dueAt: due)
+        #expect(DeadlineNudge.nudges(for: done, now: due.addingTimeInterval(-hour)).isEmpty)
+        let late = Node(kind: .item, title: "Late", dueAt: due)
+        #expect(DeadlineNudge.nudges(for: late, now: due.addingTimeInterval(1)).isEmpty)
+    }
+}

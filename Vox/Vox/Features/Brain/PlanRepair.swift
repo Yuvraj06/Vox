@@ -4,7 +4,39 @@ import Foundation
 enum PlanRepair {
     /// Every repair, in order. Used for plans from Gemini, the fast path and Thinking.
     static func all(_ actions: [BrainAction], command: String, context: BrainContext) -> [BrainAction] {
-        reuseExistingLists(itemsIntoNewList(statusFromWords(actions, command: command)), context: context)
+        reuseExistingLists(itemsIntoNewList(statusFromWords(timesFromWords(actions, command: command), command: command)), context: context)
+    }
+
+    /// Reminders and deadlines whose time is missing or unreadable get the time from the user's own words,
+    /// and "alarm" or "remind" in the words decides the kind. The model sometimes drops the time,
+    /// like "set an alarm for today after one minute" coming back with none.
+    static func timesFromWords(_ actions: [BrainAction], command: String, now: Date = .now) -> [BrainAction] {
+        let spoken = DatePhrase.spokenTime(in: command, now: now)
+        let kind = spokenReminderKind(in: command)
+        var actions = actions
+        for index in actions.indices {
+            switch actions[index].type {
+            case .createReminder:
+                if let kind { actions[index].reminderKind = kind }
+                let phrase = actions[index].timePhrase ?? ""
+                if DatePhrase.firstFire(from: phrase, now: now) == nil, let spoken { actions[index].timePhrase = spoken }
+            case .setDue:
+                let phrase = actions[index].timePhrase ?? ""
+                if DatePhrase.date(from: phrase, now: now) == nil, let spoken { actions[index].timePhrase = spoken }
+            default:
+                break
+            }
+        }
+        return actions
+    }
+
+    /// alarm for "alarm" or "wake me", reminder for "remind". Nil when neither, or both.
+    static func spokenReminderKind(in command: String) -> ReminderChoice? {
+        let text = command.lowercased()
+        let saysAlarm = text.contains("alarm") || text.contains("wake me")
+        let saysReminder = text.contains("remind")
+        if saysAlarm == saysReminder { return nil }
+        return saysAlarm ? .alarm : .reminder
     }
 
     /// "I started the EN project" or "I finished the EN project", but the plan sets no status:

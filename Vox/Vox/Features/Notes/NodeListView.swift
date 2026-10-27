@@ -29,6 +29,7 @@ struct NodeListView: View {
         }
         .overScenery()
         .navigationTitle(item?.title ?? "All Notes")
+        .navigationSubtitle(summary(item, view))
         .toolbar {
             if let item {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -84,6 +85,17 @@ struct NodeListView: View {
                 break
             }
         }
+    }
+
+    /// "List · 7 items" or "Board · 9 cards" under the title.
+    private func summary(_ item: Node?, _ view: PageView) -> String {
+        guard let item else { return "" }
+        if view == .board {
+            let cards = model.cardCount(of: item)
+            return "Board · \(cards == 1 ? "1 card" : "\(cards) cards")"
+        }
+        let count = model.children(of: parentID).count
+        return "\(view.label) · \(count == 1 ? "1 item" : "\(count) items")"
     }
 
     private func list(_ item: Node?) -> some View {

@@ -8,6 +8,8 @@ protocol ReminderScheduling {
     /// Asks for permission the first time. Throws when the user said no.
     func schedule(_ reminder: Reminder) async throws
     func cancel(id: UUID) async
+    /// Takes every deadline nudge off the clock and puts these on instead.
+    func replaceNudges(_ nudges: [DeadlineNudge]) async
 }
 
 /// Reminders are local notifications. Alarms go through AlarmKit, so they ring even on silent.
@@ -37,6 +39,10 @@ final class SystemReminderScheduler: NSObject, ReminderScheduling, UNUserNotific
 
     func schedule(_ reminder: Reminder) async throws {
         await cancel(id: reminder.id)
+        #if DEBUG
+        // Debug only: `-skipPermissionPrompts` schedules nothing, so no system prompt covers screenshots.
+        if ProcessInfo.processInfo.arguments.contains("-skipPermissionPrompts") { return }
+        #endif
         switch reminder.kind {
         case .reminder: try await scheduleNotification(reminder)
         case .alarm: try await scheduleAlarm(reminder)
@@ -70,6 +76,30 @@ final class SystemReminderScheduler: NSObject, ReminderScheduling, UNUserNotific
             repeats: reminder.repeatRule != nil
         )
         try await notifications.add(UNNotificationRequest(identifier: reminder.id.uuidString, content: content, trigger: trigger))
+    }
+
+    func replaceNudges(_ nudges: [DeadlineNudge]) async {
+        let old = await notifications.pendingNotificationRequests()
+            .map(\.identifier)
+            .filter { $0.hasPrefix(DeadlineNudge.idPrefix) }
+        notifications.removePendingNotificationRequests(withIdentifiers: old)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-skipPermissionPrompts") { return }
+        #endif
+        guard !nudges.isEmpty,
+              (try? await notifications.requestAuthorization(options: [.alert, .sound, .badge])) == true else { return }
+        for nudge in nudges {
+            let content = UNMutableNotificationContent()
+            content.title = nudge.title
+            content.body = nudge.body
+            content.sound = .default
+            content.userInfo = ["nodeID": nudge.nodeID.uuidString]
+            let trigger = UNCalendarNotificationTrigger(
+                dateMatching: Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: nudge.fireAt),
+                repeats: false
+            )
+            try? await notifications.add(UNNotificationRequest(identifier: nudge.id, content: content, trigger: trigger))
+        }
     }
 
     func userNotificationCenter(
@@ -127,7 +157,9 @@ private extension Locale.Weekday {
 /// For previews and tests: remembers what it was asked, touches nothing.
 final class FakeReminderScheduler: ReminderScheduling {
     private(set) var scheduled: Set<UUID> = []
+    private(set) var nudges: [DeadlineNudge] = []
 
     func schedule(_ reminder: Reminder) async throws { scheduled.insert(reminder.id) }
     func cancel(id: UUID) async { scheduled.remove(id) }
+    func replaceNudges(_ nudges: [DeadlineNudge]) async { self.nudges = nudges }
 }

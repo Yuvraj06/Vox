@@ -27,7 +27,7 @@ struct BoardView: View {
                             column: column,
                             showsSection: section == nil && !sections.isEmpty
                         )
-                        .containerRelativeFrame(.horizontal) { width, _ in width * 0.8 }
+                        .containerRelativeFrame(.horizontal) { width, _ in width * 0.76 }
                     }
                     editColumnsTile(isEmpty: columns.isEmpty)
                 }
@@ -56,33 +56,44 @@ struct BoardView: View {
             .frame(width: 130, height: 160)
         }
         .buttonStyle(.plain)
-        .glassEffect(.regular.interactive(), in: .rect(cornerRadius: 26))
+        .voxGlass(in: .rect(cornerRadius: 24), interactive: true)
     }
 
     private func filterBar(_ sections: [Node]) -> some View {
         ScrollView(.horizontal) {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) {
-                    chip("All", selected: sectionID == nil) { sectionID = nil }
-                    ForEach(sections) { sub in
-                        chip(sub.title, selected: sectionID == sub.id) { sectionID = sub.id }
-                    }
+            HStack(spacing: 8) {
+                chip("All", selected: sectionID == nil) { sectionID = nil }
+                ForEach(sections) { sub in
+                    chip(sub.title, selected: sectionID == sub.id) { sectionID = sub.id }
                 }
-                .padding(.horizontal, 16)
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 2)
         }
         .scrollIndicators(.hidden)
+        // The app keeps room at the bottom of scroll views for the mic. Here it would make the chip row
+        // that much taller and push the columns down.
+        .contentMargins(.bottom, 0, for: .scrollContent)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
-    @ViewBuilder
+    /// The picked section is solid white with dark text. The others are glass.
     private func chip(_ title: String, selected: Bool, action: @escaping () -> Void) -> some View {
-        if selected {
-            Button(title, action: action)
-                .buttonStyle(.glassProminent)
-                .tint(TaskStatus.doing.tint.opacity(0.8))
-        } else {
-            Button(title, action: action).buttonStyle(.glass)
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 13, weight: selected ? .semibold : .medium))
+                .foregroundStyle(selected ? Color(white: 0.1) : .white.opacity(0.9))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background {
+                    if selected { Capsule().fill(.white.opacity(0.92)) }
+                }
+                .voxGlass(in: .capsule, interactive: true)
+                .contentShape(.capsule)
         }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+        .animation(.snappy, value: selected)
     }
 }
 
@@ -100,13 +111,19 @@ private struct BoardColumnView: View {
 
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Circle().fill(tint ?? .secondary).frame(width: 9, height: 9)
-                Text(column.title).font(.headline)
-                Spacer()
+                Circle().fill(tint ?? .secondary).frame(width: 8, height: 8)
+                Text(column.title).font(.system(size: 15, weight: .semibold))
                 Text("\(column.cards.count)")
-                    .font(.subheadline.monospacedDigit().weight(.semibold))
-                    .foregroundStyle(tint ?? .secondary)
+                    .font(.system(size: 13, weight: .medium).monospacedDigit())
+                    .foregroundStyle(.white.opacity(0.5))
+                Spacer()
+                Button("Add card", systemImage: "plus") { addingCard = true }
+                    .labelStyle(.iconOnly)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .buttonStyle(.plain)
             }
+            .padding(.horizontal, 4)
 
             ScrollView {
                 LazyVStack(spacing: 10) {
@@ -130,10 +147,11 @@ private struct BoardColumnView: View {
             }
             .scrollIndicators(.hidden)
         }
-        .padding(16)
+        .padding(12)
         .frame(maxHeight: .infinity, alignment: .top)
         // The column stays neutral glass. Only the cards carry the tint.
-        .glassEffect(.regular.tint(isTargeted ? .white.opacity(0.12) : nil), in: .rect(cornerRadius: 26))
+        .background(.white.opacity(isTargeted ? 0.12 : 0), in: .rect(cornerRadius: 24))
+        .voxGlass(in: .rect(cornerRadius: 24))
         .dropDestination(for: String.self) { ids, _ in
             for id in ids.compactMap(UUID.init(uuidString:)) {
                 if let card = model.node(id: id) { model.drop(card, into: column) }
@@ -190,24 +208,27 @@ private struct TaskCard: View {
                     }
                     if let due = card.dueAt {
                         Label(due.formatted(.dateTime.day().month()), systemImage: "calendar")
+                            .foregroundStyle(Color.voxAmber)
+                            .fontWeight(.medium)
                     }
                     if !card.details.isEmpty {
                         Text(card.detailsSummary)
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.white.opacity(0.6))
+                .labelStyle(TightLabel())
             }
             Spacer(minLength: 0)
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular.tint(tint?.opacity(0.32)).interactive(), in: .rect(cornerRadius: 16))
+        .background(card: tint)
         .nodeGestures(card)
         .draggable(card.id.uuidString) {
             Text(card.title)
                 .padding(10)
-                .glassEffect(.regular.tint(tint?.opacity(0.32)), in: .rect(cornerRadius: 12))
+                .background(card: tint)
         }
     }
 
@@ -216,6 +237,27 @@ private struct TaskCard: View {
     private var typeIcon: String? {
         if card.kind == .note || card.view == .board || card.view == .checklist || card.isFolder { return card.icon }
         return model.children(of: card.id).isEmpty ? nil : card.icon
+    }
+}
+
+private extension View {
+    /// A card's soft fill and edge in its column's tint. Neutral columns get faint white.
+    func background(card tint: Color?) -> some View {
+        let color = tint ?? .white
+        let shape = RoundedRectangle(cornerRadius: 16)
+        return background(color.opacity(tint == nil ? 0.06 : 0.16), in: shape)
+            .overlay { shape.strokeBorder(color.opacity(tint == nil ? 0.15 : 0.35), lineWidth: 1) }
+            .contentShape(shape)
+    }
+}
+
+/// Icon and text close together, for the small facts under a card title.
+private struct TightLabel: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 3) {
+            configuration.icon
+            configuration.title
+        }
     }
 }
 

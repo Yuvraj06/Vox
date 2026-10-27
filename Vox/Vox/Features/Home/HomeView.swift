@@ -11,16 +11,17 @@ struct HomeView: View {
     @State private var prompt: NodePrompt?
     /// Edit mode: note rows get a delete button.
     @State private var editing = false
+    @State private var showingThinking = false
 
     var body: some View {
         ScrollView {
             VStack(spacing: 14) {
+                header
                 CountdownCard(open: open)
                 HStack(alignment: .top, spacing: 14) {
                     DayBox(title: "Today", entries: today, open: open)
                     DayBox(title: "Tomorrow", entries: tomorrow, open: open)
                 }
-                .fixedSize(horizontal: false, vertical: true)
                 allReminders
                 allNotes
             }
@@ -30,22 +31,10 @@ struct HomeView: View {
         .scrollIndicators(.hidden)
         .overScenery()
         .navigationTitle("Vox")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(editing ? "Done" : "Edit") { withAnimation(.snappy) { editing.toggle() } }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu("Add", systemImage: "plus") {
-                    Button("Reminder", systemImage: ReminderKind.reminder.icon) { editingReminder = newReminder(.reminder) }
-                    Button("Alarm", systemImage: ReminderKind.alarm.icon) { editingReminder = newReminder(.alarm) }
-                    Divider()
-                    Button("Item", systemImage: "circle") { prompt = .add(.item) }
-                    Button("Note", systemImage: "note.text") { prompt = .add(.note) }
-                    Button("Folder", systemImage: "folder") { prompt = .addFolder }
-                }
-            }
-        }
+        // Home draws its own header, so the buttons sit next to the title.
+        .toolbar(.hidden, for: .navigationBar)
         .sheet(item: $editingReminder) { ReminderEditor(reminder: $0) }
+        .sheet(isPresented: $showingThinking) { ThinkingView() }
         .nodePrompt($prompt) { prompt, title in
             switch prompt {
             case .add(let kind): notes.add(kind: kind, title: title, parentID: nil)
@@ -55,10 +44,57 @@ struct HomeView: View {
         }
     }
 
+    // MARK: Header
+
+    /// TUESDAY, OCT 27 over a big "Vox", with Thinking and Add on the right.
+    private var header: some View {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(Date.now.formatted(.dateTime.weekday(.wide).month(.abbreviated).day()).uppercased())
+                    .font(.system(size: 12, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(.white.opacity(0.55))
+                Text("Vox")
+                    .font(.system(size: 34, weight: .bold))
+                    .accessibilityAddTraits(.isHeader)
+            }
+            Spacer()
+            Button { showingThinking = true } label: {
+                ThinkingIcon()
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 40, height: 40)
+                    .voxGlass(in: .circle)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Thinking")
+            Menu {
+                Button("Reminder", systemImage: ReminderKind.reminder.icon) { editingReminder = newReminder(.reminder) }
+                Button("Alarm", systemImage: ReminderKind.alarm.icon) { editingReminder = newReminder(.alarm) }
+                Divider()
+                Button("Item", systemImage: "circle") { prompt = .add(.item) }
+                Button("Note", systemImage: "note.text") { prompt = .add(.note) }
+                Button("Folder", systemImage: "folder") { prompt = .addFolder }
+                Divider()
+                Button(editing ? "Done editing" : "Edit notes", systemImage: editing ? "checkmark" : "pencil") {
+                    withAnimation(.snappy) { editing.toggle() }
+                }
+            } label: {
+                GlassCircleIcon(systemName: "plus")
+            }
+            // Menus tint their label with the accent color. Keep it white like the brain.
+            .tint(.white)
+            .accessibilityLabel("Add")
+        }
+        .padding(.horizontal, 4)
+        .padding(.top, 2)
+    }
+
     // MARK: Days
 
+    /// All of today, including what already passed. The box starts scrolled to what is next.
     private var today: [RemindersModel.Entry] {
-        reminders.entries(on: .now).filter { $0.date >= .now }
+        reminders.entries(on: .now)
     }
 
     private var tomorrow: [RemindersModel.Entry] {
@@ -71,7 +107,7 @@ struct HomeView: View {
         let upcoming = reminders.upcoming()
         return VStack(alignment: .leading, spacing: 0) {
             NavigationLink(value: Route.allReminders) {
-                CardHeader(title: "All Reminders", count: upcoming.count)
+                CardHeader(title: "Reminders", count: upcoming.count)
             }
             .buttonStyle(.plain)
             if upcoming.isEmpty {
@@ -93,10 +129,18 @@ struct HomeView: View {
     private var allNotes: some View {
         let kids = notes.children(of: nil)
         return VStack(alignment: .leading, spacing: 0) {
-            NavigationLink(value: Route.allNotes) {
-                CardHeader(title: "All Notes", count: kids.count)
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                NavigationLink(value: Route.allNotes) {
+                    CardHeader(title: "Notes", count: kids.count)
+                }
+                .buttonStyle(.plain)
+                if editing {
+                    Button("Done") { withAnimation(.snappy) { editing = false } }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.voxAmber)
+                        .transition(.opacity)
+                }
             }
-            .buttonStyle(.plain)
             if kids.isEmpty {
                 Text("Nothing yet. Tap + or just say what to make.")
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -158,25 +202,24 @@ private struct CountdownCard: View {
 
     private func card(_ next: (entry: RemindersModel.Entry, since: Date)?, now: Date) -> some View {
         Button { if let next { open(next.entry) } } label: {
-            VStack(spacing: 10) {
-                Label(label(next?.entry), systemImage: next?.entry.isAlarm == false ? "bell.fill" : "alarm.fill")
+            VStack(alignment: .leading, spacing: 6) {
+                Label(label(next?.entry), systemImage: next?.entry.icon ?? "alarm.fill")
                     .font(.system(size: 12, weight: .semibold))
-                    .tracking(1.4)
+                    .tracking(0.6)
                     .foregroundStyle(Color.voxAmber)
                 Text(next.map { Self.clock($0.entry.date.timeIntervalSince(now)) } ?? "--:--:--")
-                    .font(.system(size: 66, weight: .thin).monospacedDigit())
+                    .font(.system(size: 60, weight: .thin).monospacedDigit())
                     .minimumScaleFactor(0.6)
                     .lineLimit(1)
                     .contentTransition(.numericText(countsDown: true))
                 Text(next.map { subtitle($0.entry) } ?? "Say \"remind me…\" or \"set an alarm…\"")
                     .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .foregroundStyle(.white.opacity(0.6))
                     .lineLimit(1)
                 ProgressBar(value: next.map { progress($0, now: now) } ?? 0)
-                    .padding(.top, 6)
+                    .padding(.top, 8)
             }
-            .frame(maxWidth: .infinity)
-            .voxCard(radius: 30, padding: 22)
+            .voxCard(radius: 26, padding: 18)
         }
         .buttonStyle(.plain)
         .animation(.smooth(duration: 0.3), value: now)
@@ -184,16 +227,17 @@ private struct CountdownCard: View {
 
     private func label(_ entry: RemindersModel.Entry?) -> String {
         guard let entry else { return "NOTHING COMING UP" }
-        return entry.isAlarm ? "NEXT ALARM IN" : "NEXT REMINDER IN"
+        let time = entry.date.formatted(date: .omitted, time: .shortened)
+        let kind = if case .deadline = entry.source { "DEADLINE" } else if entry.isAlarm { "NEXT ALARM" } else { "NEXT REMINDER" }
+        return "\(kind) · \(time)"
     }
 
     private func subtitle(_ entry: RemindersModel.Entry) -> String {
         let calendar = Calendar.current
-        let time = entry.date.formatted(date: .omitted, time: .shortened)
         let day = calendar.isDateInToday(entry.date) ? "today"
             : calendar.isDateInTomorrow(entry.date) ? "tomorrow"
             : entry.date.formatted(.dateTime.weekday(.wide))
-        return "\(entry.title)  ·  \(time) \(day)"
+        return "\(entry.title) · \(day)"
     }
 
     private func progress(_ next: (entry: RemindersModel.Entry, since: Date), now: Date) -> Double {
@@ -226,13 +270,21 @@ private struct ProgressBar: View {
 
 // MARK: Today and Tomorrow
 
+/// One day's reminders, alarms and deadlines in a box of fixed height.
+/// Every one is in there: the box scrolls, and fades at an edge when more is hidden past it.
 private struct DayBox: View {
     let title: String
     let entries: [RemindersModel.Entry]
     let open: (RemindersModel.Entry) -> Void
 
+    /// Which edges have rows hidden past them.
+    @State private var hidden = HiddenEdges()
+    @State private var position = ScrollPosition(idType: String.self)
+
+    private static let height: CGFloat = 164
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text(title).font(.headline)
                 Spacer()
@@ -243,32 +295,95 @@ private struct DayBox: View {
             }
             if entries.isEmpty {
                 Text("Nothing planned").font(.caption).foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            } else {
+                rows
             }
-            ForEach(entries.prefix(3)) { entry in
-                Button { open(entry) } label: {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: entry.icon)
-                            .font(.footnote)
-                            .foregroundStyle(entry.tint)
-                            .frame(width: 16)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(entry.title).font(.system(size: 14, weight: .medium)).lineLimit(1)
-                            Text(entry.date.formatted(date: .omitted, time: .shortened))
-                                .font(.system(size: 12)).foregroundStyle(.white.opacity(0.5))
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-            }
-            if entries.count > 3 {
-                Text("+\(entries.count - 3) more").font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
         }
-        .frame(maxHeight: .infinity, alignment: .top)
-        .voxCard(radius: 24, padding: 16)
+        .frame(height: Self.height, alignment: .top)
+        .voxCard(radius: 22, padding: 12)
+    }
+
+    private var rows: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(entries) { entry in
+                    Button { open(entry) } label: { DayRow(entry: entry) }
+                        .buttonStyle(.plain)
+                }
+            }
+            .scrollTargetLayout()
+            .padding(.bottom, 8)
+        }
+        .scrollPosition($position, anchor: .top)
+        // Shows the scroll bar for a moment, so it is clear the box scrolls.
+        .scrollIndicatorsFlash(onAppear: true)
+        .scrollIndicatorsFlash(trigger: entries.count)
+        .onScrollGeometryChange(for: HiddenEdges.self) { geo in
+            HiddenEdges(
+                top: geo.contentOffset.y > 1,
+                bottom: geo.contentOffset.y + geo.containerSize.height < geo.contentSize.height - 1
+            )
+        } action: { _, edges in
+            withAnimation(.easeOut(duration: 0.2)) { hidden = edges }
+        }
+        .mask { fade }
+        .overlay(alignment: .bottom) {
+            if hidden.bottom {
+                Image(systemName: "chevron.compact.down")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+                    .accessibilityHidden(true)
+            }
+        }
+        // Start at what is next. The ones that already passed sit just above.
+        .onAppear {
+            if let next = entries.first(where: { $0.date >= .now }), next.id != entries.first?.id {
+                position.scrollTo(id: next.id, anchor: .top)
+            }
+        }
+    }
+
+    /// Soft edges where rows are hidden.
+    private var fade: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom)
+                .frame(height: hidden.top ? 16 : 0)
+            Rectangle()
+            LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                .frame(height: hidden.bottom ? 30 : 0)
+        }
+    }
+
+    private struct HiddenEdges: Equatable {
+        var top = false
+        var bottom = false
+    }
+}
+
+/// One line: icon, title, time. Ones that already passed are dimmed.
+private struct DayRow: View {
+    let entry: RemindersModel.Entry
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: entry.icon)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(entry.tint)
+                .frame(width: 12)
+            Text(entry.title)
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            // "9:30 p" instead of "9:30 PM", so the title gets the room.
+            Text(entry.date, format: .dateTime.hour(.defaultDigits(amPM: .narrow)).minute())
+                .font(.system(size: 11, weight: .medium).monospacedDigit())
+                .foregroundStyle(.white.opacity(0.5))
+        }
+        .opacity(entry.date < .now ? 0.4 : 1)
+        .contentShape(.rect)
     }
 }
 

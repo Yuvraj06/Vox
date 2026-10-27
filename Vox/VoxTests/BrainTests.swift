@@ -245,6 +245,68 @@ struct DatePhraseTests {
         #expect(DatePhrase.date(from: "banana", now: now) == nil)
         #expect(DatePhrase.date(from: "", now: now) == nil)
     }
+
+    @Test func moreRelativePhrases() throws {
+        func seconds(_ phrase: String) throws -> TimeInterval {
+            try #require(DatePhrase.date(from: phrase, now: now)).timeIntervalSince(now)
+        }
+        #expect(try seconds("after one minute") == 60)
+        #expect(try seconds("ring in 5 min") == 300)
+        #expect(try seconds("in 1.5 hours") == 5400)
+        #expect(try seconds("in an hour and a half") == 5400)
+        #expect(try seconds("in 2 hours and 30 minutes") == 9000)
+        #expect(try seconds("in a couple of hours") == 7200)
+    }
+
+    @Test func timeFoundInsideACommand() throws {
+        for command in ["Set an alarm for today after one minute.", "Add an alarm to ring in one minute."] {
+            let phrase = try #require(DatePhrase.spokenTime(in: command, now: now))
+            let date = try #require(DatePhrase.date(from: phrase, now: now))
+            #expect(abs(date.timeIntervalSince(now) - 60) < 1)
+        }
+        #expect(DatePhrase.spokenTime(in: "Remind me to do the dishes", now: now) == nil)
+        #expect(DatePhrase.spokenTime(in: "Add the walks in my day list", now: now) == nil)
+    }
+
+    @Test func partsOfTheDayAreAhead() throws {
+        let noon = try #require(DatePhrase.date(from: "at noon", now: now))
+        #expect(noon > now)
+        #expect(Calendar.current.component(.hour, from: noon) == 12)
+        let morning = try #require(DatePhrase.date(from: "tomorrow morning", now: now))
+        #expect(Calendar.current.isDateInTomorrow(morning) || morning > now)
+    }
+
+    @Test func exactTimesReadBack() throws {
+        let date = try #require(Calendar.current.date(from: DateComponents(year: 2030, month: 3, day: 9, hour: 7, minute: 5)))
+        #expect(DatePhrase.date(from: DatePhrase.exact(date), now: now) == date)
+        let daily = DatePhrase.withRepeat(DatePhrase.exact(date), from: "wake me every day")
+        #expect(DatePhrase.repeatRule(in: daily) == .daily)
+    }
+}
+
+@MainActor
+struct TimeRepairTests {
+    @Test func missingTimeComesFromTheWords() throws {
+        let actions = [BrainAction(type: .createReminder, title: "Alarm")]
+        let fixed = PlanRepair.timesFromWords(actions, command: "Set an alarm for today after one minute.")
+        #expect(fixed[0].reminderKind == .alarm)
+        let phrase = try #require(fixed[0].timePhrase)
+        #expect(DatePhrase.firstFire(from: phrase) != nil)
+    }
+
+    @Test func kindFollowsTheWords() {
+        let actions = [BrainAction(type: .createReminder, title: "Reminder", timePhrase: "10 PM today", reminderKind: .alarm)]
+        let fixed = PlanRepair.timesFromWords(actions, command: "Add a reminder at 10 PM today.")
+        #expect(fixed[0].reminderKind == .reminder)
+        #expect(fixed[0].timePhrase == "10 PM today")
+    }
+
+    @Test func noTimeStaysEmpty() {
+        let actions = [BrainAction(type: .createReminder, title: "Do dishes", timePhrase: "")]
+        let fixed = PlanRepair.timesFromWords(actions, command: "Remind me to do the dishes")
+        #expect(fixed[0].timePhrase == "")
+        #expect(fixed[0].reminderKind == .reminder)
+    }
 }
 
 @MainActor

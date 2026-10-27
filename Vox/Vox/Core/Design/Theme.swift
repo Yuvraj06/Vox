@@ -20,14 +20,64 @@ extension Color {
     static let voxBoard = Color(red: 0.49, green: 0.77, blue: 0.60)   // #7CC59A
 }
 
+/// Clear glass: you see the scenery through it. A soft sheen at the top left,
+/// and an edge that is bright where the light hits and faint on the far side.
+private struct VoxGlass<S: InsettableShape>: ViewModifier {
+    let shape: S
+    var interactive = false
+
+    func body(content: Content) -> some View {
+        content
+            // Sits on the glass, under the content.
+            .background {
+                shape.fill(LinearGradient(
+                    stops: [
+                        .init(color: .white.opacity(0.14), location: 0),
+                        .init(color: .white.opacity(0.03), location: 0.45),
+                        .init(color: .clear, location: 1),
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ))
+            }
+            .glassEffect(interactive ? .clear.interactive() : .clear, in: shape)
+            .overlay {
+                shape.strokeBorder(
+                    LinearGradient(
+                        colors: [.white.opacity(0.5), .white.opacity(0.1), .white.opacity(0.25)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ),
+                    lineWidth: 1
+                )
+                .allowsHitTesting(false)
+            }
+    }
+}
+
 extension View {
-    /// A frosted glass panel with a faint white edge, like the home screen cards.
+    /// The app's clear glass in any shape.
+    func voxGlass(in shape: some InsettableShape, interactive: Bool = false) -> some View {
+        modifier(VoxGlass(shape: shape, interactive: interactive))
+    }
+
+    /// A clear glass panel, like the home screen cards.
     func voxCard(radius: CGFloat = 26, padding: CGFloat = 18) -> some View {
         self.padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular, in: .rect(cornerRadius: radius))
-            .overlay {
-                RoundedRectangle(cornerRadius: radius).strokeBorder(.white.opacity(0.13), lineWidth: 1)
-            }
+            .voxGlass(in: .rect(cornerRadius: radius))
+    }
+}
+
+/// A round 40 pt glass icon, for buttons in a screen's own header.
+struct GlassCircleIcon: View {
+    let systemName: String
+
+    var body: some View {
+        Image(systemName: systemName)
+            .font(.system(size: 17, weight: .semibold))
+            .frame(width: 40, height: 40)
+            .voxGlass(in: .circle)
+            .contentShape(.circle)
     }
 }

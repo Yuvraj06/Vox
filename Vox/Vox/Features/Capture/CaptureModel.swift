@@ -53,6 +53,10 @@ final class CaptureModel {
 
     /// Gets the mic and speech model ready early. Problems show up when the button is pressed instead.
     func prepare() async {
+        #if DEBUG
+        // Debug only: `-skipPermissionPrompts` waits for the first press, so no mic prompt covers screenshots.
+        if ProcessInfo.processInfo.arguments.contains("-skipPermissionPrompts") { return }
+        #endif
         try? await transcriber.prepare()
     }
 

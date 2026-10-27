@@ -128,7 +128,7 @@ extension View {
             .padding(.vertical, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
-            .glassEffect(.regular, in: .rect(cornerRadius: 18))
+            .voxGlass(in: .rect(cornerRadius: 18))
             .listRowBackground(Color.clear)
             .listRowSeparator(.hidden)
             .listRowInsets(EdgeInsets(top: 5, leading: 16 + indent, bottom: 5, trailing: 16))

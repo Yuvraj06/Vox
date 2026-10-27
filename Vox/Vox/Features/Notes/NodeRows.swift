@@ -19,13 +19,18 @@ struct NodeRow: View {
                     .foregroundStyle(node.columnType?.tint ?? (node.isFolder ? node.tint : (isContainer ? .primary : .secondary)))
                     .frame(width: 28)
             }
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(node.title)
                     .font(isContainer ? .body.weight(.medium) : .body)
                     .strikethrough(node.status == .done)
                     .foregroundStyle(node.status == .done ? .secondary : .primary)
-                if let subtitle {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                if rating != nil || subtitle != nil {
+                    HStack(spacing: 8) {
+                        if let rating { StarRating(value: rating) }
+                        if let subtitle {
+                            Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             Spacer()
@@ -42,7 +47,9 @@ struct NodeRow: View {
             return node.body?.split(separator: "\n").first.map(String.init)
         }
         var parts: [String] = []
-        if !node.details.isEmpty { parts.append(node.detailsSummary) }
+        // A rating already shows as stars.
+        let details = node.details.filter { rating == nil || $0.key.lowercased() != "rating" }
+        if !details.isEmpty { parts.append(details.map { "\($0.key) \($0.value)" }.joined(separator: " · ")) }
         if node.isBoard {
             let cards = model.cardCount(of: node)
             parts.append("Board · \(cards == 1 ? "1 card" : "\(cards) cards")")
@@ -54,6 +61,30 @@ struct NodeRow: View {
         }
         if let due = node.dueAt { parts.append("Due \(due.formatted(.relative(presentation: .named)))") }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// A whole number rating from 0 to 5, shown as stars.
+    private var rating: Int? {
+        guard let detail = node.details.first(where: { $0.key.lowercased() == "rating" }),
+              let value = Int(detail.value), (0...5).contains(value) else { return nil }
+        return value
+    }
+}
+
+/// Five small stars, the first `value` lit amber.
+struct StarRating: View {
+    let value: Int
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(0..<5, id: \.self) { index in
+                Image(systemName: "star.fill")
+                    .foregroundStyle(index < value ? Color.voxAmber : .white.opacity(0.22))
+            }
+        }
+        .font(.system(size: 10))
+        .accessibilityElement()
+        .accessibilityLabel("\(value) of 5 stars")
     }
 }
 

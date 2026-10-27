@@ -74,18 +74,24 @@ final class RemindersModel {
         return limit.map { Array(all.prefix($0)) } ?? all
     }
 
-    /// The next reminder or alarm to go off (not a deadline), and when the one before it went off.
-    /// The countdown on the home screen runs between the two. Looks at reminders only, so it stays quick.
+    /// The next reminder, alarm or deadline, and when the one before it went off.
+    /// The countdown on the home screen runs between the two.
     func nextTimed(after now: Date = .now) -> (entry: Entry, since: Date)? {
         _ = revision
         let pending = pending()
-        guard let (reminder, date) = pending
-            .compactMap({ reminder in reminder.nextFire(after: now).map { (reminder, $0) } })
-            .min(by: { $0.1 < $1.1 }) else { return nil }
+        // Each with the time it was set, where the countdown starts if nothing went off before it.
+        let reminders = pending.compactMap { reminder in
+            reminder.nextFire(after: now).map { (entry: Entry(date: $0, source: .reminder(reminder)), set: reminder.updatedAt) }
+        }
+        let deadlines = allNodes().compactMap { node -> (entry: Entry, set: Date)? in
+            guard let due = node.dueAt, due > now, node.status != .done else { return nil }
+            return (Entry(date: due, source: .deadline(node)), node.updatedAt)
+        }
+        guard let next = (reminders + deadlines).min(by: { $0.entry.date < $1.entry.date }) else { return nil }
         let lastDay = DateInterval(start: now.addingTimeInterval(-86_400), end: now)
         let previous = pending.flatMap { $0.occurrences(in: lastDay) }.max()
-        let since = max(previous ?? reminder.updatedAt, date.addingTimeInterval(-86_400))
-        return (Entry(date: date, source: .reminder(reminder)), min(since, now))
+        let since = max(previous ?? next.set, next.entry.date.addingTimeInterval(-86_400))
+        return (next.entry, min(since, now))
     }
 
     private func pending() -> [Reminder] {
@@ -169,6 +175,25 @@ final class RemindersModel {
             }
         }
         revision += 1
+        rescheduleNudges(now: now)
+    }
+
+    /// iOS keeps at most 64 waiting notifications per app. Nudges take the soonest 40, leaving room for reminders.
+    static let maxNudges = 40
+    /// The last nudge update. The next one waits for it, so two never mix.
+    private var nudgeTask: Task<Void, Never>?
+
+    /// Puts deadline nudges on the clock for every open item with a due date, replacing the old ones.
+    private func rescheduleNudges(now: Date) {
+        let nudges = allNodes()
+            .flatMap { DeadlineNudge.nudges(for: $0, now: now) }
+            .sorted { $0.fireAt < $1.fireAt }
+            .prefix(Self.maxNudges)
+        let previous = nudgeTask
+        nudgeTask = Task { [scheduler] in
+            await previous?.value
+            await scheduler.replaceNudges(Array(nudges))
+        }
     }
 
     // MARK: Helpers
