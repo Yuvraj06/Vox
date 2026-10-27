@@ -25,6 +25,7 @@ extension NodeStore {
         status: TaskStatus? = nil,
         view: PageView? = nil,
         columnType: TaskStatus? = nil,
+        color: String? = nil,
         body: String? = nil,
         details: [NodeDetail] = []
     ) throws -> Node {
@@ -37,6 +38,7 @@ extension NodeStore {
             status: status,
             view: view,
             columnType: columnType,
+            color: color,
             details: details,
             position: NodeOrdering.position(between: last, and: nil)
         )

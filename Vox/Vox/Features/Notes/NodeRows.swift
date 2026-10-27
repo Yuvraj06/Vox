@@ -10,34 +10,31 @@ struct NodeRow: View {
         let hasChildren = !model.children(of: node.id).isEmpty
         let isContainer = node.kind == .note || hasChildren || node.view != .list
 
-        // Hidden link under a custom row, so the chevron stays inside the glass card.
-        ZStack {
-            NavigationLink(value: node) { EmptyView() }.opacity(0)
-            HStack(spacing: 12) {
-                if node.isTask {
-                    StatusCheckbox(node: node)
-                } else {
-                    Image(systemName: isContainer ? node.icon : "circle.fill")
-                        .font(isContainer ? .title3 : .caption2)
-                        .foregroundStyle(node.columnType?.tint ?? (isContainer ? .primary : .secondary))
-                        .frame(width: 28)
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(node.title)
-                        .font(isContainer ? .body.weight(.medium) : .body)
-                        .strikethrough(node.status == .done)
-                        .foregroundStyle(node.status == .done ? .secondary : .primary)
-                    if let subtitle {
-                        Text(subtitle).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                if node.status == .doing { DoingBadge() }
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+        HStack(spacing: 12) {
+            if node.isTask {
+                StatusCheckbox(node: node)
+            } else {
+                Image(systemName: isContainer ? node.icon : "circle.fill")
+                    .font(isContainer ? .title3 : .caption2)
+                    .foregroundStyle(node.columnType?.tint ?? (node.isFolder ? node.tint : (isContainer ? .primary : .secondary)))
+                    .frame(width: 28)
             }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(node.title)
+                    .font(isContainer ? .body.weight(.medium) : .body)
+                    .strikethrough(node.status == .done)
+                    .foregroundStyle(node.status == .done ? .secondary : .primary)
+                if let subtitle {
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if node.status == .doing { DoingBadge() }
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
+        .nodeGestures(node)
     }
 
     private var subtitle: String? {
@@ -99,24 +96,113 @@ struct DoingBadge: View {
     }
 }
 
-/// Long-press menu shared by every row.
-struct NodeMenu: View {
+/// Big Todo, Doing, Done buttons. Tap the lit one again to clear it.
+/// On a board, the card moves to the column that fits.
+struct StatusButtons: View {
     let node: Node
-    let rename: () -> Void
     @Environment(NotesModel.self) private var model
 
     var body: some View {
-        if node.kind == .item {
-            Picker("Status", selection: Binding(
-                get: { node.status },
-                set: { model.setStatus(node, $0) }
-            )) {
-                Text("No status").tag(TaskStatus?.none)
-                ForEach(TaskStatus.allCases, id: \.self) { Text($0.label).tag(TaskStatus?.some($0)) }
+        HStack(spacing: 10) {
+            ForEach(TaskStatus.allCases, id: \.self) { status in
+                let selected = node.status == status
+                Button {
+                    model.setStatus(node, selected ? nil : status)
+                } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: status.icon).font(.title2)
+                        Text(status.label).font(.subheadline.weight(.semibold))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 64)
+                    .foregroundStyle(selected ? Color.black.opacity(0.8) : status.tint)
+                    .background(status.tint.opacity(selected ? 1 : 0.18), in: .rect(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+                .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
-        Button("Rename", systemImage: "pencil", action: rename)
-        Button("Delete", systemImage: "trash", role: .destructive) { model.delete([node.id]) }
+        .sensoryFeedback(.selection, trigger: node.status)
+    }
+}
+
+/// Opens a node: pushes its screen. Set by the root navigation.
+struct OpenNodeAction {
+    var open: (Node) -> Void = { _ in }
+    func callAsFunction(_ node: Node) { open(node) }
+}
+
+extension EnvironmentValues {
+    @Entry var openNode = OpenNodeAction()
+}
+
+/// Tap opens the node. Hold, then let go, opens its settings instead.
+/// A board card that starts dragging never gets the release, so dragging still works.
+private struct NodeGestures: ViewModifier {
+    let node: Node
+    @Environment(\.openNode) private var openNode
+    @State private var showingSettings = false
+    /// True once the finger has stayed down long enough. The release then opens settings.
+    @State private var held = false
+
+    func body(content: Content) -> some View {
+        Button {
+            if held { showingSettings = true } else { openNode(node) }
+            held = false
+        } label: {
+            content.contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.35)
+                .onChanged { _ in held = false }
+                .onEnded { _ in held = true }
+        )
+        .sensoryFeedback(.impact(weight: .light), trigger: held) { _, new in new }
+        .sheet(isPresented: $showingSettings) {
+            ItemInfoView(itemID: node.id)
+        }
+    }
+}
+
+/// Swipe right for Todo, Doing, Done. Folders, notes and board columns have no status.
+private struct StatusSwipe: ViewModifier {
+    let node: Node
+    @Environment(NotesModel.self) private var model
+
+    func body(content: Content) -> some View {
+        let parent = node.parentID.flatMap { model.node(id: $0) }
+        let isColumn = parent?.isBoard == true && !node.isBoard
+        if node.kind == .item, !node.isFolder, !isColumn {
+            content.swipeActions(edge: .leading, allowsFullSwipe: false) {
+                // Swipe actions show right to left, so Done is listed first to end up on the outside.
+                ForEach(TaskStatus.allCases.reversed(), id: \.self) { status in
+                    Button(status.label, systemImage: node.status == status ? "checkmark" : status.icon) {
+                        model.setStatus(node, node.status == status ? nil : status)
+                    }
+                    .tint(status.tint)
+                }
+            }
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// Tap opens the node, hold opens its settings.
+    func nodeGestures(_ node: Node) -> some View { modifier(NodeGestures(node: node)) }
+
+    /// Swipe right to set Todo, Doing or Done.
+    func statusSwipe(_ node: Node) -> some View { modifier(StatusSwipe(node: node)) }
+}
+
+extension TaskStatus {
+    var icon: String {
+        switch self {
+        case .todo: "circle"
+        case .doing: "circle.lefthalf.filled"
+        case .done: "checkmark.circle.fill"
+        }
     }
 }
 
@@ -144,6 +230,7 @@ extension PageView {
         case .list: "list.bullet"
         case .checklist: "checklist"
         case .board: "rectangle.split.3x1"
+        case .folder: "folder.fill"
         }
     }
 }

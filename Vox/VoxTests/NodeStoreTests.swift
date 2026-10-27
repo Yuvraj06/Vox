@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import SwiftUI
 @testable import Vox
 
 @MainActor
@@ -210,5 +211,92 @@ struct NodeStoreTests {
         let line = try store.create(kind: .item, title: "Dune", parentID: nil)
         model.toggleDone(line)
         #expect(try store.node(id: line.id)?.status == .done)
+    }
+}
+
+@MainActor
+struct FolderTests {
+    let store: SwiftDataNodeStore
+    let model: NotesModel
+
+    init() throws {
+        store = try .inMemory()
+        model = NotesModel(store: store)
+    }
+
+    @Test func newFoldersGetDifferentPresetColors() throws {
+        model.addFolder("Personal", parentID: nil)
+        model.addFolder("Work", parentID: nil)
+
+        let folders = try store.children(of: nil)
+        #expect(folders.allSatisfy { $0.isFolder })
+        #expect(folders.map(\.color) == [FolderPalette.presets[0].hex, FolderPalette.presets[1].hex])
+    }
+
+    @Test func colorIsSaved() throws {
+        model.addFolder("Personal", parentID: nil)
+        let folder = try #require(try store.children(of: nil).first)
+
+        model.setColor(folder, hex: "#123456")
+
+        #expect(try store.node(id: folder.id)?.color == "#123456")
+    }
+
+    @Test func moveIntoFolderAndBack() throws {
+        model.addFolder("Personal", parentID: nil)
+        let folder = try #require(try store.children(of: nil).first)
+        let movies = try store.create(kind: .item, title: "Movies", parentID: nil)
+
+        model.move(movies, to: folder.id)
+        #expect(try store.children(of: folder.id).map(\.title) == ["Movies"])
+
+        model.move(try #require(try store.node(id: movies.id)), to: nil)
+        #expect(try store.children(of: folder.id).isEmpty)
+    }
+
+    @Test func cannotMoveFolderIntoItself() throws {
+        let outer = try store.create(kind: .item, title: "Outer", parentID: nil, view: .folder)
+        let inner = try store.create(kind: .item, title: "Inner", parentID: outer.id, view: .folder)
+        let other = try store.create(kind: .item, title: "Other", parentID: nil, view: .folder)
+
+        let destinations = model.folderDestinations(for: outer).map(\.id)
+        #expect(destinations == [other.id])
+        #expect(!destinations.contains(inner.id))
+    }
+
+    @Test func hexRoundTrip() throws {
+        let color = try #require(Color(hex: "#F7AD52"))
+        #expect(color.hex == "#F7AD52")
+    }
+}
+
+@MainActor
+struct NodeTypeTests {
+    @Test func changesBetweenTypes() throws {
+        let store = try SwiftDataNodeStore.inMemory()
+        let model = NotesModel(store: store)
+        let item = try store.create(kind: .item, title: "Trip", parentID: nil, status: .todo)
+
+        model.setType(item, view: .folder)
+        var now = try #require(try store.node(id: item.id))
+        #expect(now.isFolder && now.status == nil && now.color != nil)
+
+        model.setType(now, view: nil)
+        now = try #require(try store.node(id: item.id))
+        #expect(now.kind == .note)
+
+        model.setType(now, view: .checklist)
+        now = try #require(try store.node(id: item.id))
+        #expect(now.kind == .item && now.view == .checklist)
+    }
+
+    @Test func itemWithChildrenStaysAnItem() throws {
+        let store = try SwiftDataNodeStore.inMemory()
+        let model = NotesModel(store: store)
+        let item = try store.create(kind: .item, title: "Trip", parentID: nil)
+        try store.create(kind: .item, title: "Passport", parentID: item.id)
+
+        model.setType(item, view: nil)
+        #expect(try store.node(id: item.id)?.kind == .item)
     }
 }

@@ -2,7 +2,7 @@ import Foundation
 
 /// One entry in the notes tree. Same shape as the `nodes` table in Supabase.
 /// This is a plain value type, so the UI never touches SwiftData directly.
-struct Node: Identifiable, Hashable, Sendable {
+struct Node: Identifiable, Hashable, Codable, Sendable {
     var id: UUID
     var userID: UUID?
     var parentID: UUID?
@@ -15,6 +15,8 @@ struct Node: Identifiable, Hashable, Sendable {
     var view: PageView?
     /// Items only. When this item is a board column: its type. nil = neutral.
     var columnType: TaskStatus?
+    /// Items only. A color the user picked, as hex like "#F7AD52". Used by folders.
+    var color: String?
     /// Small ordered fields, like rating or coordinates.
     var details: [NodeDetail]
     var dueAt: Date?
@@ -34,6 +36,7 @@ struct Node: Identifiable, Hashable, Sendable {
         status: TaskStatus? = nil,
         view: PageView? = nil,
         columnType: TaskStatus? = nil,
+        color: String? = nil,
         details: [NodeDetail] = [],
         dueAt: Date? = nil,
         estimateMinutes: Int? = nil,
@@ -51,6 +54,7 @@ struct Node: Identifiable, Hashable, Sendable {
         self.status = kind == .item ? status : nil
         self.view = kind == .item ? (view ?? .list) : nil
         self.columnType = kind == .item ? columnType : nil
+        self.color = kind == .item ? color : nil
         self.details = details
         self.dueAt = dueAt
         self.estimateMinutes = estimateMinutes
@@ -62,6 +66,7 @@ struct Node: Identifiable, Hashable, Sendable {
 
     var isTask: Bool { status != nil }
     var isBoard: Bool { view == .board }
+    var isFolder: Bool { view == .folder }
 }
 
 enum NodeKind: String, Codable, CaseIterable, Sendable {
@@ -86,13 +91,14 @@ enum TaskStatus: String, Codable, CaseIterable, Sendable {
 }
 
 enum PageView: String, Codable, CaseIterable, Sendable {
-    case list, checklist, board
+    case list, checklist, board, folder
 
     var label: String {
         switch self {
         case .list: "List"
         case .checklist: "Checklist"
         case .board: "Board"
+        case .folder: "Folder"
         }
     }
 }

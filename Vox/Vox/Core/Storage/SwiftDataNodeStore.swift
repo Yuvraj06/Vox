@@ -17,6 +17,7 @@ final class NodeEntity {
     /// JSON array of {key, value}. Matches the `details` jsonb column.
     var detailsJSON: String?
     var columnType: String?
+    var color: String?
     var dueAt: Date?
     var estimateMinutes: Int?
     var position: Double
@@ -35,6 +36,7 @@ final class NodeEntity {
         view = node.view?.rawValue
         detailsJSON = Self.encode(node.details)
         columnType = node.columnType?.rawValue
+        color = node.color
         dueAt = node.dueAt
         estimateMinutes = node.estimateMinutes
         position = node.position
@@ -53,6 +55,7 @@ final class NodeEntity {
         view = node.view?.rawValue
         detailsJSON = Self.encode(node.details)
         columnType = node.columnType?.rawValue
+        color = node.color
         dueAt = node.dueAt
         estimateMinutes = node.estimateMinutes
         position = node.position
@@ -71,6 +74,7 @@ final class NodeEntity {
             status: status.flatMap(TaskStatus.init(rawValue:)),
             view: view.flatMap(PageView.init(rawValue:)),
             columnType: columnType.flatMap(TaskStatus.init(rawValue:)),
+            color: color,
             details: Self.decode(detailsJSON),
             dueAt: dueAt,
             estimateMinutes: estimateMinutes,
@@ -106,15 +110,9 @@ final class SwiftDataNodeStore: NodeStore {
         self.container = container
     }
 
-    /// Store on disk for the real app.
-    static func persistent() throws -> SwiftDataNodeStore {
-        SwiftDataNodeStore(container: try ModelContainer(for: NodeEntity.self))
-    }
-
     /// Throwaway store for tests and previews.
     static func inMemory() throws -> SwiftDataNodeStore {
-        let config = ModelConfiguration(isStoredInMemoryOnly: true)
-        return SwiftDataNodeStore(container: try ModelContainer(for: NodeEntity.self, configurations: config))
+        SwiftDataNodeStore(container: try LocalDatabase.inMemory())
     }
 
     func node(id: UUID) throws -> Node? {

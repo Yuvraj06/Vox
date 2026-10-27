@@ -32,16 +32,14 @@ struct ChecklistView: View {
                 .glassRow(indent: CGFloat(row.depth) * 22)
                 .swipeActions {
                     Button("Delete", systemImage: "trash", role: .destructive) { model.delete([row.node.id]) }
-                }
-                .contextMenu {
                     if row.node.kind == .item {
-                        Button("Add sub-item", systemImage: "plus") {
+                        Button("Sub-item", systemImage: "plus") {
                             addTarget = row.node.id
                             prompt = .add(.item)
                         }
                     }
-                    NodeMenu(node: row.node) { prompt = .rename(row.node) }
                 }
+                .statusSwipe(row.node)
             }
         }
         .listStyle(.plain)
@@ -58,39 +56,37 @@ struct ChecklistView: View {
     }
 
     private func entryRow(_ row: Row) -> some View {
-        ZStack {
-            NavigationLink(value: row.node) { EmptyView() }.opacity(0)
-            HStack(spacing: 10) {
-                if row.hasChildren {
-                    Button {
-                        withAnimation(.snappy) { toggle(row.node.id) }
-                    } label: {
-                        Image(systemName: "chevron.right")
-                            .font(.footnote.weight(.bold))
-                            .rotationEffect(.degrees(collapsed.contains(row.node.id) ? 0 : 90))
-                            .frame(width: 18, height: 28)
-                    }
-                    .buttonStyle(.plain)
-                } else {
-                    Color.clear.frame(width: 18, height: 1)
+        HStack(spacing: 10) {
+            if row.hasChildren {
+                Button {
+                    withAnimation(.snappy) { toggle(row.node.id) }
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(.footnote.weight(.bold))
+                        .rotationEffect(.degrees(collapsed.contains(row.node.id) ? 0 : 90))
+                        .frame(width: 18, height: 28)
                 }
-
-                StatusCheckbox(node: row.node)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(row.node.title)
-                        .strikethrough(row.node.status == .done)
-                        .foregroundStyle(row.node.status == .done ? .secondary : .primary)
-                    if let progress = model.progress(of: row.node.id) {
-                        Text("\(progress.done)/\(progress.total) done")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-                if row.node.status == .doing { DoingBadge() }
+                .buttonStyle(.plain)
+            } else {
+                Color.clear.frame(width: 18, height: 1)
             }
+
+            StatusCheckbox(node: row.node)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.node.title)
+                    .strikethrough(row.node.status == .done)
+                    .foregroundStyle(row.node.status == .done ? .secondary : .primary)
+                if let progress = model.progress(of: row.node.id) {
+                    Text("\(progress.done)/\(progress.total) done")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if row.node.status == .doing { DoingBadge() }
         }
+        .nodeGestures(row.node)
     }
 
     /// Turns the tree into rows, skipping the children of folded entries.

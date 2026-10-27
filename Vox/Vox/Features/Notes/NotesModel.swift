@@ -8,9 +8,18 @@ final class NotesModel {
     /// Bumped after every write. Reads touch it so views redraw.
     private var revision = 0
     var errorMessage: String?
+    /// Called after every change, from this model or from outside (like a voice command).
+    /// Reminders use it to cancel the ones whose item is done.
+    var onChange: () -> Void = {}
 
     init(store: any NodeStore) {
         self.store = store
+    }
+
+    /// Call after something outside this model (like a voice command) changed nodes.
+    func refresh() {
+        revision += 1
+        onChange()
     }
 
     // MARK: Reads
@@ -121,11 +130,81 @@ final class NotesModel {
         changed.view = view
         save(changed)
         if view == .board, children(of: item.id).isEmpty {
-            perform {
-                for status in TaskStatus.allCases {
-                    try store.create(kind: .item, title: status.label, parentID: item.id, columnType: status)
-                }
+            perform { try store.addDefaultColumns(to: item.id) }
+        }
+    }
+
+    // MARK: Folders
+
+    /// New folder with the next preset color.
+    func addFolder(_ title: String, parentID: UUID?) {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return }
+        let siblingFolders = children(of: parentID).filter(\.isFolder).count
+        perform {
+            try store.create(
+                kind: .item, title: title, parentID: parentID,
+                view: .folder, color: FolderPalette.preset(after: siblingFolders).hex
+            )
+        }
+    }
+
+    /// Turns a node into a list, checklist, board, folder or note. Pass nil as `view` for a note.
+    /// Only an empty item can become a note, since notes can't hold items. Folders get a color and lose their status.
+    func setType(_ node: Node, view: PageView?) {
+        var changed = node
+        if let view {
+            if node.kind == .note {
+                changed.kind = .item
+                changed.view = .list
+                save(changed)
             }
+            if view == .folder {
+                changed.status = nil
+                if changed.color == nil {
+                    let siblingFolders = children(of: node.parentID).filter(\.isFolder).count
+                    changed.color = FolderPalette.preset(after: siblingFolders).hex
+                }
+                save(changed)
+            }
+            setView(changed, view)
+        } else {
+            guard node.kind == .item, children(of: node.id).isEmpty else { return }
+            changed.kind = .note
+            changed.view = nil
+            changed.status = nil
+            save(changed)
+        }
+    }
+
+    func setColor(_ node: Node, hex: String) {
+        guard node.color != hex else { return }
+        var changed = node
+        changed.color = hex
+        save(changed)
+    }
+
+    /// Folders `node` can move into: every folder except itself, anything inside it, and where it already is.
+    func folderDestinations(for node: Node) -> [Node] {
+        var all: [Node] = []
+        var queue: [UUID?] = [nil]
+        while !queue.isEmpty {
+            let kids = children(of: queue.removeFirst())
+            all += kids
+            queue += kids.filter { $0.kind == .item }.map(\.id)
+        }
+        let inside = Set(((try? store.descendants(of: node.id)) ?? []).map(\.id) + [node.id])
+        return all.filter { $0.isFolder && !inside.contains($0.id) && $0.id != node.parentID }
+    }
+
+    /// Moves a node to the end of another parent. nil is the top level.
+    func move(_ node: Node, to parentID: UUID?) {
+        guard node.parentID != parentID else { return }
+        var moved = node
+        moved.parentID = parentID
+        perform {
+            moved.position = try store.endPosition(in: parentID, excluding: node.id)
+            try store.update(moved)
         }
     }
 
@@ -235,24 +314,12 @@ final class NotesModel {
 
     // MARK: Helpers
 
-    /// If `card` sits in a board column that no longer fits its status, move it to a sibling column that does.
     private func moveToFittingColumn(_ card: Node) {
-        guard let column = card.parentID.flatMap({ node(id: $0) }), !column.isBoard,
-              let board = column.parentID.flatMap({ node(id: $0) }), board.isBoard,
-              !ColumnRules.accepts(column.columnType, card.status) else { return }
-        let siblings = columnItems(in: board)
-        let target = siblings.first { $0.columnType != nil && $0.columnType == card.status }
-            ?? siblings.first { ColumnRules.accepts($0.columnType, card.status) }
-        guard let target else { return }
-        var moved = card
-        moved.parentID = target.id
-        moved.position = endPosition(in: target.id, excluding: card.id)
-        save(moved)
+        perform { try store.moveToFittingColumn(card) }
     }
 
     private func endPosition(in parentID: UUID, excluding id: UUID) -> Double {
-        let last = children(of: parentID).filter { $0.id != id }.last?.position
-        return NodeOrdering.position(between: last, and: nil)
+        (try? store.endPosition(in: parentID, excluding: id)) ?? 1
     }
 
     private func perform(_ work: () throws -> Void) {
@@ -262,5 +329,6 @@ final class NotesModel {
             errorMessage = error.localizedDescription
         }
         revision += 1
+        onChange()
     }
 }

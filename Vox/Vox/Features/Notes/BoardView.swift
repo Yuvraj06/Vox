@@ -25,7 +25,6 @@ struct BoardView: View {
                         BoardColumnView(
                             board: board,
                             column: column,
-                            allColumns: columns,
                             showsSection: section == nil && !sections.isEmpty
                         )
                         .containerRelativeFrame(.horizontal) { width, _ in width * 0.8 }
@@ -90,7 +89,6 @@ struct BoardView: View {
 private struct BoardColumnView: View {
     let board: Node
     let column: NotesModel.BoardColumn
-    let allColumns: [NotesModel.BoardColumn]
     let showsSection: Bool
     @Environment(NotesModel.self) private var model
     @State private var isTargeted = false
@@ -116,7 +114,6 @@ private struct BoardColumnView: View {
                         TaskCard(
                             card: card,
                             tint: tint,
-                            columns: allColumns,
                             sectionName: showsSection ? sectionName(of: card) : nil
                         )
                     }
@@ -166,56 +163,59 @@ private struct TaskCard: View {
     let card: Node
     /// The column's tint. nil in neutral columns.
     let tint: Color?
-    /// For the "Move to" menu.
-    let columns: [NotesModel.BoardColumn]
     let sectionName: String?
     @Environment(NotesModel.self) private var model
 
     var body: some View {
-        NavigationLink(value: card) {
-            HStack(alignment: .top, spacing: 10) {
-                StatusCheckbox(node: card, plain: tint == nil)
+        HStack(alignment: .top, spacing: 10) {
+            StatusCheckbox(node: card, plain: tint == nil)
 
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if let typeIcon {
+                        Image(systemName: typeIcon)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
                     Text(card.title)
                         .strikethrough(card.status == .done)
                         .multilineTextAlignment(.leading)
-                    HStack(spacing: 10) {
-                        if let sectionName {
-                            Label(sectionName, systemImage: "square.stack")
-                        }
-                        if let progress = model.progress(of: card.id) {
-                            Label("\(progress.done)/\(progress.total)", systemImage: "checklist")
-                        }
-                        if let due = card.dueAt {
-                            Label(due.formatted(.dateTime.day().month()), systemImage: "calendar")
-                        }
-                        if !card.details.isEmpty {
-                            Text(card.detailsSummary)
-                        }
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
                 }
-                Spacer(minLength: 0)
+                HStack(spacing: 10) {
+                    if let sectionName {
+                        Label(sectionName, systemImage: "square.stack")
+                    }
+                    if let progress = model.progress(of: card.id) {
+                        Label("\(progress.done)/\(progress.total)", systemImage: "checklist")
+                    }
+                    if let due = card.dueAt {
+                        Label(due.formatted(.dateTime.day().month()), systemImage: "calendar")
+                    }
+                    if !card.details.isEmpty {
+                        Text(card.detailsSummary)
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .contentShape(.rect)
+            Spacer(minLength: 0)
         }
-        .buttonStyle(.plain)
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular.tint(tint?.opacity(0.32)).interactive(), in: .rect(cornerRadius: 16))
+        .nodeGestures(card)
         .draggable(card.id.uuidString) {
             Text(card.title)
                 .padding(10)
                 .glassEffect(.regular.tint(tint?.opacity(0.32)), in: .rect(cornerRadius: 12))
         }
-        .contextMenu {
-            ForEach(columns) { column in
-                Button("Move to \(column.title)") { model.drop(card, into: column) }
-            }
-            Button("Delete", systemImage: "trash", role: .destructive) { model.delete([card.id]) }
-        }
+    }
+
+    /// What kind of thing the card is: a board, checklist, folder, note, or a list with items inside.
+    /// A plain card with nothing inside gets no icon.
+    private var typeIcon: String? {
+        if card.kind == .note || card.view == .board || card.view == .checklist || card.isFolder { return card.icon }
+        return model.children(of: card.id).isEmpty ? nil : card.icon
     }
 }
 

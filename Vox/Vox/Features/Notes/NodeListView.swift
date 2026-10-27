@@ -21,12 +21,14 @@ struct NodeListView: View {
                 if let item { BoardView(board: item, sectionID: $sectionFilter, editingColumns: $editingColumns) }
             case .checklist:
                 ChecklistView(parentID: parentID)
+            case .folder:
+                FolderView(parentID: parentID)
             case .list:
                 list(item)
             }
         }
         .overScenery()
-        .navigationTitle(item?.title ?? "Vox")
+        .navigationTitle(item?.title ?? "All Notes")
         .toolbar {
             if let item {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -54,6 +56,7 @@ struct NodeListView: View {
                     } else {
                         Button("Item", systemImage: "circle") { prompt = .add(.item) }
                         Button("Note", systemImage: "note.text") { prompt = .add(.note) }
+                        Button("Folder", systemImage: "folder") { prompt = .addFolder }
                     }
                 }
             }
@@ -75,6 +78,8 @@ struct NodeListView: View {
                 model.add(kind: .item, title: title, parentID: sectionFilter ?? parentID)
             case .addSection:
                 model.addSection(title, to: parentID)
+            case .addFolder:
+                model.addFolder(title, parentID: parentID)
             case .rename:
                 break
             }
@@ -99,7 +104,7 @@ struct NodeListView: View {
                         }
                         Button("Rename", systemImage: "pencil") { prompt = .rename(node) }
                     }
-                    .contextMenu { NodeMenu(node: node) { prompt = .rename(node) } }
+                    .statusSwipe(node)
             }
             .onMove { model.move(in: parentID, from: $0, to: $1) }
             .onDelete { offsets in model.delete(offsets.map { kids[$0].id }) }
@@ -175,6 +180,7 @@ enum NodePrompt {
     case add(NodeKind)
     case addColumn
     case addSection
+    case addFolder
     case rename(Node)
 
     var id: String {
@@ -182,6 +188,7 @@ enum NodePrompt {
         case .add(let kind): "add-\(kind.rawValue)"
         case .addColumn: "add-column"
         case .addSection: "add-section"
+        case .addFolder: "add-folder"
         case .rename(let node): "rename-\(node.id)"
         }
     }
@@ -191,6 +198,7 @@ enum NodePrompt {
         case .add(let kind): "New \(kind.name.lowercased())"
         case .addColumn: "New column"
         case .addSection: "New section"
+        case .addFolder: "New folder"
         case .rename: "Rename"
         }
     }
