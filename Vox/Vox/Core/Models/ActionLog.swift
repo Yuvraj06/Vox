@@ -46,6 +46,18 @@ enum InverseStep: Codable, Hashable, Sendable {
     case removeReminder(UUID)
 }
 
+extension ActionLogEntry {
+    /// Ids of every node and reminder this command changed.
+    var touchedIDs: Set<UUID> {
+        Set(inverse.map { step in
+            switch step {
+            case .remove(let id), .removeReminder(let id): id
+            case .restore(let node): node.id
+            }
+        })
+    }
+}
+
 extension NodeStore {
     /// Applies undo steps. Removes first, then restores, so a node moved
     /// under a removed node still comes back.

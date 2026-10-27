@@ -5,4 +5,5 @@ enum Route: Hashable {
     case node(Node)
     case allNotes
     case allReminders
+    case history
 }

@@ -7,6 +7,7 @@ import SwiftUI
     @State private var thinking: ThinkingQueue
     @State private var gemini: GeminiSettings
     @State private var reminders: RemindersModel
+    @State private var history: HistoryModel
 
     init() {
         let container = Self.makeContainer()
@@ -27,9 +28,10 @@ import SwiftUI
         // An item marked done (by hand or by voice) cancels its reminders.
         notes.onChange = { reminders.reconcile() }
         let gemini = GeminiSettings()
+        let actionLog = SwiftDataActionLogStore(container: container)
         let brain = Brain(
             nodes: nodeStore,
-            log: SwiftDataActionLogStore(container: container),
+            log: actionLog,
             gemini: gemini,
             reminders: reminderStore,
             onChange: { notes.refresh() },
@@ -41,6 +43,11 @@ import SwiftUI
         _thinking = State(initialValue: brain.thinking)
         _gemini = State(initialValue: gemini)
         _reminders = State(initialValue: reminders)
+        _history = State(initialValue: HistoryModel(
+            log: actionLog,
+            ancestors: { id in nodeStore.ancestorIDs(of: id) },
+            undo: { try brain.undo($0) }
+        ))
     }
 
     var body: some Scene {
@@ -51,6 +58,7 @@ import SwiftUI
                 .environment(thinking)
                 .environment(gemini)
                 .environment(reminders)
+                .environment(history)
                 .task { await reminders.rescheduleAll() }
         }
     }

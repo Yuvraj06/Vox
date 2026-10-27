@@ -95,6 +95,22 @@ struct ReminderTests {
         if case .deadline(let node) = entries.last?.source { #expect(node.title == "Report") } else { Issue.record("expected the deadline last") }
         #expect(model.busyDays(in: DateInterval(start: tomorrow, duration: 86_400)) == [tomorrow])
     }
+
+    @Test func dayKeepsWhatAlreadyWentOff() throws {
+        let (model, _, _) = try makeModel()
+        let today = Calendar.current.startOfDay(for: .now)
+        let day = DateInterval(start: today, duration: 86_400)
+        let noon = today.addingTimeInterval(12 * 3600)
+        model.save(Reminder(title: "Lunch", fireAt: noon))
+        var cancelled = Reminder(title: "Gone", fireAt: noon.addingTimeInterval(3600))
+        cancelled.done = true
+        model.save(cancelled)
+
+        // After 1 PM, lunch went off and is marked done, but the day still shows it.
+        model.reconcile(now: noon.addingTimeInterval(1800))
+        let titles = model.entries(in: day, now: noon.addingTimeInterval(1800)).map(\.title)
+        #expect(titles == ["Lunch"])
+    }
 }
 
 /// "Remind me ..." and "set an alarm ..." from the Brain.

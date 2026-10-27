@@ -19,6 +19,7 @@ struct ContentView: View {
                     case .node(let node): NodeListView(parentID: node.id).thinkingButton()
                     case .allNotes: NodeListView(parentID: nil).thinkingButton()
                     case .allReminders: AllRemindersView().thinkingButton()
+                    case .history: HistoryView().thinkingButton()
                     }
                 }
         }
@@ -86,6 +87,11 @@ struct ContentView: View {
         .environment(CaptureModel(runner: PreviewRunner()))
         .environment(ThinkingQueue())
         .environment(GeminiSettings())
+        .environment(HistoryModel(
+            log: SwiftDataActionLogStore(container: try! LocalDatabase.inMemory()),
+            ancestors: { _ in [] },
+            undo: { _ in }
+        ))
         .environment(RemindersModel(
             store: try! SwiftDataReminderStore.inMemory(),
             nodes: try! SwiftDataNodeStore.inMemory(),

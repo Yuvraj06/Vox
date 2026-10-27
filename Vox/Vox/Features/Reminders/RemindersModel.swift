@@ -43,9 +43,10 @@ final class RemindersModel {
     }
 
     /// Reminders, alarms and deadlines in `interval`, soonest first.
-    func entries(in interval: DateInterval) -> [Entry] {
+    /// Ones that already went off stay, so a day shows everything it had. Cancelled ones still to come don't.
+    func entries(in interval: DateInterval, now: Date = .now) -> [Entry] {
         _ = revision
-        let reminders = ((try? store.all()) ?? []).filter { !$0.done }.flatMap { reminder in
+        let reminders = ((try? store.all()) ?? []).filter { !$0.done || $0.fireAt <= now }.flatMap { reminder in
             reminder.occurrences(in: interval).map { Entry(date: $0, source: .reminder(reminder)) }
         }
         let deadlines = allNodes().compactMap { node -> Entry? in

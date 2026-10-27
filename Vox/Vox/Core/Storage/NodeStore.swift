@@ -69,3 +69,16 @@ enum NodeOrdering {
         }
     }
 }
+
+extension NodeStore {
+    /// The parent, grandparent and so on, up to the top level. Stops if the tree loops back on itself.
+    func ancestorIDs(of id: UUID) -> [UUID] {
+        var chain: [UUID] = []
+        var next = ((try? node(id: id)) ?? nil)?.parentID
+        while let parent = next, !chain.contains(parent) {
+            chain.append(parent)
+            next = ((try? node(id: parent)) ?? nil)?.parentID
+        }
+        return chain
+    }
+}

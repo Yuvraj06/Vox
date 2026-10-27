@@ -59,6 +59,9 @@ struct HomeView: View {
                     .accessibilityAddTraits(.isHeader)
             }
             Spacer()
+            NavigationLink(value: Route.history) { GlassCircleIcon(systemName: "clock.arrow.circlepath") }
+                .buttonStyle(.plain)
+                .accessibilityLabel("History")
             Button { showingThinking = true } label: {
                 ThinkingIcon()
                     .font(.system(size: 17, weight: .semibold))

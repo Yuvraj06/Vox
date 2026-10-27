@@ -680,3 +680,65 @@ struct StatusWordsTests {
         #expect(try store.children(of: nil).count == 1)
     }
 }
+
+@MainActor
+struct HistoryTests {
+    private let start = Date(timeIntervalSince1970: 1_800_000_000)
+
+    private func entry(_ text: String, minute: Double, _ inverse: [InverseStep]) -> ActionLogEntry {
+        ActionLogEntry(createdAt: start.addingTimeInterval(minute * 60), transcript: text, actionsJSON: "[]", inverse: inverse, summary: text)
+    }
+
+    private func makeModel(_ entries: [ActionLogEntry], parents: [UUID: UUID] = [:]) throws -> (HistoryModel, SwiftDataActionLogStore) {
+        let log = SwiftDataActionLogStore(container: try LocalDatabase.inMemory())
+        for entry in entries { try log.append(entry) }
+        let model = HistoryModel(
+            log: log,
+            ancestors: { id in parents[id].map { [$0] } ?? [] },
+            undo: { try log.markUndone(id: $0) }
+        )
+        model.reload()
+        return (model, log)
+    }
+
+    @Test func freeWhenNothingNewerTouchesIt() throws {
+        let a = UUID(), b = UUID()
+        let first = entry("add Dune", minute: 0, [.remove(a)])
+        let second = entry("add Arrival", minute: 1, [.remove(b)])
+        let (model, _) = try makeModel([first, second])
+        #expect(model.blocker(for: first) == nil)
+    }
+
+    @Test func newerChangeToTheSameItemBlocks() throws {
+        let dune = Node(kind: .item, title: "Dune")
+        let first = entry("add Dune", minute: 0, [.remove(dune.id)])
+        let second = entry("rename Dune", minute: 1, [.restore(dune)])
+        let (model, log) = try makeModel([first, second])
+        #expect(model.blocker(for: first)?.id == second.id)
+
+        model.undo(first)
+        #expect(model.errorMessage?.contains("rename Dune") == true)
+        #expect(try log.entry(id: first.id)?.undone == false)
+    }
+
+    @Test func itemAddedInsideANewListBlocks() throws {
+        let list = UUID(), item = UUID()
+        let first = entry("make Movies", minute: 0, [.remove(list)])
+        let second = entry("add Dune to Movies", minute: 1, [.remove(item)])
+        let (model, _) = try makeModel([first, second], parents: [item: list])
+        #expect(model.blocker(for: first)?.id == second.id)
+    }
+
+    @Test func undoneNewerCommandsDontBlock() throws {
+        let dune = Node(kind: .item, title: "Dune")
+        let first = entry("add Dune", minute: 0, [.remove(dune.id)])
+        var second = entry("rename Dune", minute: 1, [.restore(dune)])
+        second.undone = true
+        let (model, log) = try makeModel([first, second])
+        #expect(model.blocker(for: first) == nil)
+
+        model.undo(first)
+        #expect(model.errorMessage == nil)
+        #expect(try log.entry(id: first.id)?.undone == true)
+    }
+}
