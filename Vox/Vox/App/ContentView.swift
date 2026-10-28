@@ -31,9 +31,11 @@ struct ContentView: View {
         // One background for every screen. It stays still and blurs as you go deeper.
         .background { SceneryBackground(depth: path.count) }
         // Darkens the bottom so the mic stands out over the last cards.
-        .overlay(alignment: .bottom) {
+        // A full screen layer reaches past the home bar; a 200 pt one alone stopped above it and left a bright edge.
+        .overlay {
             LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom)
-                .frame(height: 200)
+                .frame(height: 240)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
         }
