@@ -138,9 +138,10 @@ private struct SignedInCard: View {
                     Text(email).font(.headline).lineLimit(1)
                 }
             }
-            Text("Your notes, reminders and history now belong to this account. Syncing them is the next step.")
+            Text("Your notes, reminders and history sync with this account, so they are backed up and ready for the web app.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.65))
+            SyncStatusRow()
             if let error = auth.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.footnote)
@@ -162,6 +163,69 @@ private struct SignedInCard: View {
                 .foregroundStyle(.secondary)
         }
         .voxCard(radius: 28, padding: 20)
+    }
+}
+
+/// "Synced 2 min ago" with a Sync now button, or what went wrong.
+private struct SyncStatusRow: View {
+    @Environment(SyncEngine.self) private var sync
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Group {
+                if sync.status == .syncing {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: icon).foregroundStyle(tint)
+                }
+            }
+            .frame(width: 20)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.subheadline.weight(.medium))
+                if let detail { Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
+            }
+            Spacer(minLength: 8)
+            Button("Sync now") { Task { await sync.syncNow() } }
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.voxAmber)
+                .disabled(sync.status == .syncing)
+        }
+        .padding(12)
+        .background(.white.opacity(0.06), in: .rect(cornerRadius: 14))
+    }
+
+    private var title: String {
+        switch sync.status {
+        case .syncing: "Syncing..."
+        case .offline: "Waiting for internet"
+        case .failed: "Sync didn't finish"
+        case .idle:
+            if let last = sync.lastSynced { "Synced \(last.formatted(.relative(presentation: .named)))" } else { "Not synced yet" }
+        }
+    }
+
+    private var detail: String? {
+        switch sync.status {
+        case .failed(let message): message
+        case .offline: "Changes are saved here and go up when you're back online."
+        default: nil
+        }
+    }
+
+    private var icon: String {
+        switch sync.status {
+        case .offline: "wifi.slash"
+        case .failed: "exclamationmark.triangle.fill"
+        default: sync.lastSynced == nil ? "icloud" : "checkmark.icloud.fill"
+        }
+    }
+
+    private var tint: Color {
+        switch sync.status {
+        case .failed: TaskStatus.doing.tint
+        case .offline: .secondary
+        default: TaskStatus.done.tint
+        }
     }
 }
 

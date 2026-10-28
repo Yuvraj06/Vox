@@ -7,6 +7,7 @@ struct HomeView: View {
     @Environment(RemindersModel.self) private var reminders
     @Environment(\.openNode) private var openNode
     @Environment(AuthModel.self) private var auth
+    @Environment(SyncEngine.self) private var sync
 
     @State private var editingReminder: Reminder?
     @State private var prompt: NodePrompt?
@@ -30,6 +31,8 @@ struct HomeView: View {
             .padding(.top, 4)
         }
         .scrollIndicators(.hidden)
+        // Pull down to sync now, when signed in.
+        .refreshable { await sync.syncNow() }
         .overScenery()
         .navigationTitle("Vox")
         // Home draws its own header, so the buttons sit next to the title.

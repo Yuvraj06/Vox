@@ -9,6 +9,8 @@ import SwiftUI
     @State private var reminders: RemindersModel
     @State private var history: HistoryModel
     @State private var auth: AuthModel
+    @State private var sync: SyncEngine
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let container = Self.makeContainer()
@@ -44,12 +46,23 @@ import SwiftUI
         _thinking = State(initialValue: brain.thinking)
         _gemini = State(initialValue: gemini)
         _reminders = State(initialValue: reminders)
-        // Signing in gives everything made while signed out to that account.
-        _auth = State(initialValue: AuthModel { userID in
-            try? nodeStore.claimUnowned(by: userID)
-            try? reminderStore.claimUnowned(by: userID)
-            try? actionLog.claimUnowned(by: userID)
-        })
+        // Downloads from other devices refresh the screens and put new reminders on the clock.
+        let sync = SyncEngine(store: SwiftDataSyncStore(container: container)) {
+            notes.refresh()
+            Task { await reminders.rescheduleAll() }
+        }
+        _sync = State(initialValue: sync)
+        // Signing in gives everything made while signed out to that account, then syncs it.
+        _auth = State(initialValue: AuthModel(
+            onSignIn: { userID in
+                try? nodeStore.claimUnowned(by: userID)
+                try? reminderStore.claimUnowned(by: userID)
+                try? actionLog.claimUnowned(by: userID)
+                sync.userID = userID
+                Task { await sync.syncNow() }
+            },
+            onSignOut: { sync.userID = nil }
+        ))
         _history = State(initialValue: HistoryModel(
             log: actionLog,
             ancestors: { id in nodeStore.ancestorIDs(of: id) },
@@ -67,8 +80,13 @@ import SwiftUI
                 .environment(reminders)
                 .environment(history)
                 .environment(auth)
+                .environment(sync)
                 // The confirmation email's link opens Vox here.
                 .onOpenURL { url in Task { await auth.handle(url) } }
+                // Coming back to the app picks up changes made elsewhere.
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { Task { await sync.syncNow() } }
+                }
                 .task { await reminders.rescheduleAll() }
         }
     }

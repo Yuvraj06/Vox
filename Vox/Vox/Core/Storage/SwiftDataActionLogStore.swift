@@ -13,6 +13,8 @@ final class ActionLogEntity {
     var inverseJSON: String
     var summary: String
     var undone: Bool
+    /// Changed on this phone and not uploaded yet. Rows from before sync start marked, so they all go up once.
+    var needsPush: Bool = true
 
     init(_ entry: ActionLogEntry) {
         id = entry.id
@@ -50,6 +52,7 @@ final class SwiftDataActionLogStore: ActionLogStore {
     func append(_ entry: ActionLogEntry) throws {
         context.insert(ActionLogEntity(entry))
         try context.save()
+        LocalChange.post()
     }
 
     func entry(id: UUID) throws -> ActionLogEntry? {
@@ -65,14 +68,20 @@ final class SwiftDataActionLogStore: ActionLogStore {
     func claimUnowned(by userID: UUID) throws {
         let unowned = try context.fetch(FetchDescriptor<ActionLogEntity>(predicate: #Predicate { $0.userID == nil }))
         guard !unowned.isEmpty else { return }
-        for row in unowned { row.userID = userID }
+        for row in unowned {
+            row.userID = userID
+            row.needsPush = true
+        }
         try context.save()
+        LocalChange.post()
     }
 
     func markUndone(id: UUID) throws {
         guard let entity = try entity(id: id) else { return }
         entity.undone = true
+        entity.needsPush = true
         try context.save()
+        LocalChange.post()
     }
 
     private func entity(id: UUID) throws -> ActionLogEntity? {

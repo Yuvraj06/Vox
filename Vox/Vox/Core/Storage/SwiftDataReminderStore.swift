@@ -16,6 +16,8 @@ final class ReminderEntity {
     var done: Bool
     var updatedAt: Date
     var deleted: Bool
+    /// Changed on this phone and not uploaded yet. Rows from before sync start marked, so they all go up once.
+    var needsPush: Bool = true
 
     init(_ reminder: Reminder) {
         id = reminder.id
@@ -40,6 +42,7 @@ final class ReminderEntity {
         done = reminder.done
         updatedAt = reminder.updatedAt
         deleted = reminder.deleted
+        needsPush = true
     }
 
     var value: Reminder {
@@ -74,8 +77,12 @@ final class SwiftDataReminderStore: ReminderStore {
     func claimUnowned(by userID: UUID) throws {
         let unowned = try context.fetch(FetchDescriptor<ReminderEntity>(predicate: #Predicate { $0.userID == nil }))
         guard !unowned.isEmpty else { return }
-        for row in unowned { row.userID = userID }
+        for row in unowned {
+            row.userID = userID
+            row.needsPush = true
+        }
         try context.save()
+        LocalChange.post()
     }
 
     func reminder(id: UUID) throws -> Reminder? {
@@ -99,13 +106,16 @@ final class SwiftDataReminderStore: ReminderStore {
             context.insert(ReminderEntity(reminder))
         }
         try context.save()
+        LocalChange.post()
     }
 
     func delete(id: UUID) throws {
         guard let entity = try entity(id: id) else { return }
         entity.deleted = true
         entity.updatedAt = .now
+        entity.needsPush = true
         try context.save()
+        LocalChange.post()
     }
 
     private func entity(id: UUID) throws -> ReminderEntity? {

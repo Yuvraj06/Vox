@@ -106,6 +106,7 @@ extension ContentView {
         .environment(ThinkingQueue())
         .environment(GeminiSettings())
         .environment(AuthModel(client: nil))
+        .environment(SyncEngine(client: nil, store: SwiftDataSyncStore(container: try! LocalDatabase.inMemory())) {})
         .environment(HistoryModel(
             log: SwiftDataActionLogStore(container: try! LocalDatabase.inMemory()),
             ancestors: { _ in [] },

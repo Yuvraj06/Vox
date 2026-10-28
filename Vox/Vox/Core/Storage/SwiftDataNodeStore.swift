@@ -24,6 +24,8 @@ final class NodeEntity {
     var createdAt: Date
     var updatedAt: Date
     var deleted: Bool
+    /// Changed on this phone and not uploaded yet. Rows from before sync start marked, so they all go up once.
+    var needsPush: Bool = true
 
     init(_ node: Node) {
         id = node.id
@@ -61,6 +63,7 @@ final class NodeEntity {
         position = node.position
         updatedAt = node.updatedAt
         deleted = node.deleted
+        needsPush = true
     }
 
     var value: Node {
@@ -118,8 +121,12 @@ final class SwiftDataNodeStore: NodeStore {
     func claimUnowned(by userID: UUID) throws {
         let unowned = try context.fetch(FetchDescriptor<NodeEntity>(predicate: #Predicate { $0.userID == nil }))
         guard !unowned.isEmpty else { return }
-        for row in unowned { row.userID = userID }
+        for row in unowned {
+            row.userID = userID
+            row.needsPush = true
+        }
         try context.save()
+        LocalChange.post()
     }
 
     func node(id: UUID) throws -> Node? {
@@ -148,6 +155,7 @@ final class SwiftDataNodeStore: NodeStore {
     func insert(_ node: Node) throws {
         context.insert(NodeEntity(node))
         try context.save()
+        LocalChange.post()
     }
 
     func update(_ node: Node) throws {
@@ -156,6 +164,7 @@ final class SwiftDataNodeStore: NodeStore {
         changed.updatedAt = .now
         entity.apply(changed)
         try context.save()
+        LocalChange.post()
     }
 
     func delete(id: UUID) throws {
@@ -165,8 +174,10 @@ final class SwiftDataNodeStore: NodeStore {
             guard let entity = try entity(id: nodeID) else { continue }
             entity.deleted = true
             entity.updatedAt = now
+            entity.needsPush = true
         }
         try context.save()
+        LocalChange.post()
     }
 
     private func entity(id: UUID) throws -> NodeEntity? {

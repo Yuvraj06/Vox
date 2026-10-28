@@ -28,10 +28,16 @@ final class AuthModel {
     private let client: SupabaseClient?
     /// Runs every time someone is signed in, including when the app opens with a saved session.
     private let onSignIn: (UUID) -> Void
+    private let onSignOut: () -> Void
 
-    init(client: SupabaseClient? = SupabaseConfig.client, onSignIn: @escaping (UUID) -> Void = { _ in }) {
+    init(
+        client: SupabaseClient? = SupabaseConfig.client,
+        onSignIn: @escaping (UUID) -> Void = { _ in },
+        onSignOut: @escaping () -> Void = {}
+    ) {
         self.client = client
         self.onSignIn = onSignIn
+        self.onSignOut = onSignOut
         Task { await watchSession() }
     }
 
@@ -79,6 +85,7 @@ final class AuthModel {
                 onSignIn(session.user.id)
             } else {
                 state = .signedOut
+                onSignOut()
             }
         }
     }
