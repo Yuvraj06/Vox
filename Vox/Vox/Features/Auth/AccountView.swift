@@ -20,6 +20,9 @@ struct AccountView: View {
         .scrollDismissesKeyboard(.interactively)
         .overScenery()
         .navigationTitle("Account")
+        .onChange(of: auth.state) { Haptics.success() }
+        .onChange(of: auth.errorMessage) { _, message in if message != nil { Haptics.error() } }
+        .onChange(of: auth.confirmationSentTo) { _, email in if email != nil { Haptics.success() } }
     }
 }
 

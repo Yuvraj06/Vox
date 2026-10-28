@@ -8,6 +8,8 @@ final class NotesModel {
     /// Bumped after every write. Reads touch it so views redraw.
     private var revision = 0
     var errorMessage: String?
+    /// Goes up each time a task is ticked off by hand. The app celebrates when it changes.
+    private(set) var tasksDone = 0
     /// Called after every change, from this model or from outside (like a voice command).
     /// Reminders use it to cancel the ones whose item is done.
     var onChange: () -> Void = {}
@@ -113,7 +115,14 @@ final class NotesModel {
 
     /// Sets the status. If the item is a board card, it also moves to a column that fits,
     /// so every view agrees (ticking done moves it to the Done column).
+    /// Open todos in the Reminders list, in list order.
+    func reminderTodos() -> [Node] {
+        guard let list = children(of: nil).first(where: \.isRemindersList) else { return [] }
+        return children(of: list.id).filter { $0.status != .done }
+    }
+
     func setStatus(_ node: Node, _ status: TaskStatus?) {
+        if status == .done, node.status != .done { tasksDone += 1 }
         var changed = node
         changed.status = status
         save(changed)
@@ -251,6 +260,7 @@ final class NotesModel {
         guard let target else { return }
         var changed = card
         changed.status = ColumnRules.statusOnDrop(into: target.columnType, from: card.status)
+        if changed.status == .done, card.status != .done { tasksDone += 1 }
         if target.id != card.parentID {
             changed.parentID = target.id
             changed.position = endPosition(in: target.id, excluding: card.id)

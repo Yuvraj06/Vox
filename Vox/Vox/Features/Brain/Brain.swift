@@ -151,7 +151,7 @@ final class Brain: CommandRunner {
     /// Reminders and deadlines get their time from the user's words when the model missed it.
     /// If Swift still can't read a time, the model works out the exact date as a last try.
     private func resolveTimes(_ actions: [BrainAction], text: String) async -> [BrainAction] {
-        var actions = PlanRepair.timesFromWords(actions, command: text)
+        var actions = PlanRepair.timesFromWords(PlanRepair.todosIntoReminders(actions, command: text), command: text)
         let unread = actions.indices.filter { index in
             let phrase = actions[index].timePhrase ?? ""
             switch actions[index].type {

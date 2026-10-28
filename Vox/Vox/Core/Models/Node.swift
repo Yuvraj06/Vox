@@ -69,6 +69,16 @@ struct Node: Identifiable, Hashable, Codable, Sendable {
     var isFolder: Bool { view == .folder }
 }
 
+extension Node {
+    /// The top level list for todos and reminders with no time. Made the first time one is added.
+    static let remindersListTitle = "Reminders"
+
+    /// True for that list.
+    var isRemindersList: Bool {
+        parentID == nil && kind == .item && title.lowercased() == Self.remindersListTitle.lowercased()
+    }
+}
+
 enum NodeKind: String, Codable, CaseIterable, Sendable {
     case item, note
 

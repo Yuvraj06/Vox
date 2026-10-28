@@ -4,6 +4,7 @@ import SwiftUI
 /// Tap a day on the calendar to see just that day.
 struct AllRemindersView: View {
     @Environment(RemindersModel.self) private var reminders
+    @Environment(NotesModel.self) private var notes
     @Environment(\.openNode) private var openNode
     @State private var month = Calendar.current.startOfDay(for: .now)
     @State private var selectedDay: Date?
@@ -14,6 +15,7 @@ struct AllRemindersView: View {
 
         ScrollView {
             VStack(spacing: 14) {
+                todoCard
                 MonthCalendar(month: $month, selectedDay: $selectedDay, busyDays: reminders.busyDays(in: monthInterval))
                 VStack(alignment: .leading, spacing: 0) {
                     Text(selectedDay.map { $0.formatted(.dateTime.weekday(.wide).day().month(.wide)) } ?? "Coming up")
@@ -42,7 +44,26 @@ struct AllRemindersView: View {
         .scrollIndicators(.hidden)
         .overScenery()
         .navigationTitle("All Reminders")
+        .animation(.snappy, value: notes.reminderTodos().map(\.id))
         .sheet(item: $editing) { ReminderEditor(reminder: $0) }
+    }
+
+    /// Todos with no time, from the Reminders list. Hidden when there are none.
+    @ViewBuilder
+    private var todoCard: some View {
+        let todos = notes.reminderTodos()
+        if !todos.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("To do").font(.headline)
+                    Spacer()
+                    Text("\(todos.count)").font(.subheadline.monospacedDigit()).foregroundStyle(.white.opacity(0.5))
+                }
+                .padding(.bottom, 4)
+                TodoList(todos: todos)
+            }
+            .voxCard()
+        }
     }
 
     private var monthInterval: DateInterval {

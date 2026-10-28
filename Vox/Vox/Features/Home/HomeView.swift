@@ -118,12 +118,13 @@ struct HomeView: View {
 
     private var allReminders: some View {
         let upcoming = reminders.upcoming()
+        let todos = notes.reminderTodos()
         return VStack(alignment: .leading, spacing: 0) {
             NavigationLink(value: Route.allReminders) {
-                CardHeader(title: "Reminders", count: upcoming.count)
+                CardHeader(title: "Reminders", count: upcoming.count + todos.count)
             }
             .buttonStyle(.plain)
-            if upcoming.isEmpty {
+            if upcoming.isEmpty && todos.isEmpty {
                 Text("Say \"remind me…\" or tap + to add one.")
                     .font(.subheadline).foregroundStyle(.secondary)
                     .padding(.top, 12)
@@ -133,7 +134,17 @@ struct HomeView: View {
                 Button { open(entry) } label: { DatedRow(entry: entry) }
                     .buttonStyle(.plain)
             }
+            if !todos.isEmpty {
+                Text("TO DO")
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(0.6)
+                    .foregroundStyle(.white.opacity(0.5))
+                    .padding(.top, upcoming.isEmpty ? 8 : 14)
+                    .padding(.bottom, 2)
+                TodoList(todos: todos, limit: 3)
+            }
         }
+        .animation(.snappy, value: todos.map(\.id))
         .voxCard()
     }
 

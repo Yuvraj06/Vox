@@ -38,6 +38,10 @@ struct ContentView: View {
                 .allowsHitTesting(false)
         }
         .overlay(alignment: .bottom) { CaptureOverlay() }
+        // A light tap under every touch, and bigger feedback for the moments that matter.
+        .tapHaptics()
+        .onChange(of: model.tasksDone) { Haptics.taskDone() }
+        .onChange(of: capture.phase) { _, phase in Self.feedback(for: phase) }
         // The mic only talks about the open screen.
         .onChange(of: path, initial: true) {
             if case .node(let node)? = path.last { capture.scope = node } else { capture.scope = nil }
@@ -78,6 +82,19 @@ struct ContentView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(reminders.errorMessage ?? "")
+        }
+    }
+}
+
+extension ContentView {
+    /// Plan ready, applied, needs a closer look, or went wrong.
+    private static func feedback(for phase: CaptureModel.Phase) {
+        switch phase {
+        case .preview: Haptics.thud()
+        case .queued: Haptics.warning()
+        case .finished(let outcome):
+            if case .applied = outcome { Haptics.success() } else { Haptics.error() }
+        default: break
         }
     }
 }

@@ -4,7 +4,25 @@ import Foundation
 enum PlanRepair {
     /// Every repair, in order. Used for plans from Gemini, the fast path and Thinking.
     static func all(_ actions: [BrainAction], command: String, context: BrainContext) -> [BrainAction] {
-        reuseExistingLists(itemsIntoNewList(statusFromWords(timesFromWords(actions, command: command), command: command)), context: context)
+        let actions = timesFromWords(todosIntoReminders(actions, command: command), command: command)
+        return reuseExistingLists(itemsIntoNewList(statusFromWords(actions, command: command)), context: context)
+    }
+
+    /// "Add a todo to get soap" names no list, so the model puts it at the top level.
+    /// A todo with no list goes to Reminders instead, the same as a reminder with no time.
+    /// Plans that make a list are left alone: "make a todo list for Orbit" means that list.
+    static func todosIntoReminders(_ actions: [BrainAction], command: String) -> [BrainAction] {
+        guard saysTodo(command), !actions.contains(where: { $0.type == .createNode }) else { return actions }
+        return actions.map { action in
+            guard action.type == .addItem, isTop(action.parent) else { return action }
+            return BrainAction(type: .createReminder, title: action.title, timePhrase: "", reminderKind: .reminder)
+        }
+    }
+
+    /// "todo", "to do" or "task" in the words.
+    static func saysTodo(_ command: String) -> Bool {
+        let text = " " + command.lowercased().split { !$0.isLetter && $0 != "-" }.joined(separator: " ") + " "
+        return [" todo ", " todos ", " to do ", " to-do ", " task ", " tasks "].contains { text.contains($0) }
     }
 
     /// Reminders and deadlines whose time is missing or unreadable get the time from the user's own words,

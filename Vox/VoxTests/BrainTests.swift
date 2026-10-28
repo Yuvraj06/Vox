@@ -301,6 +301,30 @@ struct TimeRepairTests {
         #expect(fixed[0].timePhrase == "10 PM today")
     }
 
+    @Test func todoWithNoListGoesToReminders() {
+        let actions = [BrainAction(type: .addItem, title: "Get soap")]
+        let fixed = PlanRepair.todosIntoReminders(actions, command: "Add a todo to get soap")
+        #expect(fixed[0].type == .createReminder)
+        #expect(fixed[0].title == "Get soap")
+        #expect(fixed[0].timePhrase == "")
+    }
+
+    @Test func todoInANamedListStaysThere() {
+        let intoList = [BrainAction(type: .addItem, parent: "n4", title: "Get soap")]
+        #expect(PlanRepair.todosIntoReminders(intoList, command: "Add get soap to my shopping todo")[0].type == .addItem)
+        let newList = [BrainAction(type: .createNode, title: "Orbit"), BrainAction(type: .addItem, parent: "#1", title: "Frontend")]
+        #expect(PlanRepair.todosIntoReminders(newList, command: "Make a todo list for Orbit").map(\.type) == [.createNode, .addItem])
+        let plain = [BrainAction(type: .addItem, title: "Dune")]
+        #expect(PlanRepair.todosIntoReminders(plain, command: "Add Dune")[0].type == .addItem)
+    }
+
+    @Test func todoWithATimeBecomesAReminder() throws {
+        let actions = PlanRepair.todosIntoReminders([BrainAction(type: .addItem, title: "Get soap")], command: "todo get soap in 2 hours")
+        let timed = PlanRepair.timesFromWords(actions, command: "todo get soap in 2 hours")
+        #expect(timed[0].type == .createReminder)
+        #expect(DatePhrase.firstFire(from: try #require(timed[0].timePhrase)) != nil)
+    }
+
     @Test func noTimeStaysEmpty() {
         let actions = [BrainAction(type: .createReminder, title: "Do dishes", timePhrase: "")]
         let fixed = PlanRepair.timesFromWords(actions, command: "Remind me to do the dishes")

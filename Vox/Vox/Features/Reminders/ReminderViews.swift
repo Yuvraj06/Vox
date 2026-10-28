@@ -13,7 +13,11 @@ struct ReminderSection: View {
                 Button { editing = reminder } label: { ReminderRow(reminder: reminder) }
                     .buttonStyle(.plain)
                     .swipeActions {
-                        Button("Delete", systemImage: "trash", role: .destructive) { reminders.delete(reminder) }
+                        Button("Delete", systemImage: "trash", role: .destructive) {
+                            reminders.delete(reminder)
+                            Haptics.thud()
+                            Haptics.thud()
+                        }
                     }
             }
             Button("Add reminder", systemImage: ReminderKind.reminder.icon) { editing = newReminder(.reminder) }
@@ -101,6 +105,7 @@ struct ReminderEditor: View {
                     Button("Save") {
                         if case .weekly = reminder.repeatRule { reminder.repeatRule = .weekly(weekday) }
                         reminders.save(reminder)
+                        Haptics.success()
                         dismiss()
                     }
                     .disabled(reminder.title.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -236,5 +241,42 @@ extension RemindersModel.Entry {
 
     var isAlarm: Bool {
         if case .reminder(let reminder) = source { reminder.kind == .alarm } else { false }
+    }
+}
+
+/// A todo from the Reminders list: tick it off, or tap to open it.
+struct TodoRow: View {
+    let node: Node
+
+    var body: some View {
+        HStack(spacing: 10) {
+            StatusCheckbox(node: node)
+            Text(node.title)
+                .font(.system(size: 15, weight: .medium))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+        .nodeGestures(node)
+    }
+}
+
+/// The open todos, with a count of any that don't fit.
+struct TodoList: View {
+    let todos: [Node]
+    var limit = Int.max
+
+    var body: some View {
+        ForEach(Array(todos.prefix(limit).enumerated()), id: \.element.id) { index, node in
+            if index > 0 { Divider().overlay(.white.opacity(0.08)) }
+            TodoRow(node: node)
+                .transition(.opacity.combined(with: .move(edge: .leading)))
+        }
+        if todos.count > limit {
+            Text("+\(todos.count - limit) more to do")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 6)
+        }
     }
 }

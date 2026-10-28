@@ -14,7 +14,7 @@ struct HistoryView: View {
                     ForEach(group.entries) { entry in
                         HistoryRow(entry: entry) {
                             history.undo(entry)
-                            if history.errorMessage == nil { undos += 1 }
+                            if history.errorMessage == nil { undos += 1 } else { Haptics.error() }
                         }
                         .glassRow()
                     }

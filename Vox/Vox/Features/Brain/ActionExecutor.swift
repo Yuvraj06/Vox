@@ -225,12 +225,10 @@ final class ActionExecutor {
     // MARK: Placing items
 
     /// Where reminders without a time go: the top level "Reminders" list, made the first time it's needed.
-    static let remindersListTitle = "Reminders"
+    static let remindersListTitle = Node.remindersListTitle
 
     private func remindersList() throws -> Node {
-        if let list = try store.children(of: nil).first(where: {
-            $0.kind == .item && $0.title.lowercased() == Self.remindersListTitle.lowercased()
-        }) {
+        if let list = try store.children(of: nil).first(where: \.isRemindersList) {
             return list
         }
         return try store.create(kind: .item, title: Self.remindersListTitle, parentID: nil, view: .checklist)

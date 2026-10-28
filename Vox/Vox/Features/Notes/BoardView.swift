@@ -156,6 +156,7 @@ private struct BoardColumnView: View {
             for id in ids.compactMap(UUID.init(uuidString:)) {
                 if let card = model.node(id: id) { model.drop(card, into: column) }
             }
+            Haptics.thud()
             return true
         } isTargeted: { isTargeted = $0 }
         .padding(.bottom, 8)

@@ -340,7 +340,10 @@ private struct ResultCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             if case .applied(_, _, let logID) = outcome {
-                Button { capture.undo(logID) } label: {
+                Button {
+                    capture.undo(logID)
+                    Haptics.success()
+                } label: {
                     Label("Undo", systemImage: "arrow.uturn.backward")
                         .font(.subheadline.weight(.semibold))
                         .padding(.horizontal, 12)

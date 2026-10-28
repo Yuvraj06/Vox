@@ -101,6 +101,8 @@ struct StatusCheckbox: View {
         } label: {
             Image(systemName: icon)
                 .imageScale(.large)
+                // Pops when ticked off, with the haptic and the bell.
+                .symbolEffect(.bounce.up.byLayer, value: node.status == .done)
                 .foregroundStyle(plain ? AnyShapeStyle(.secondary) : node.status.map { AnyShapeStyle($0.tint) } ?? AnyShapeStyle(.secondary))
                 .frame(width: 28)
         }
