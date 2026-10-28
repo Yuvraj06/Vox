@@ -71,6 +71,13 @@ final class SwiftDataReminderStore: ReminderStore {
         SwiftDataReminderStore(container: try LocalDatabase.inMemory())
     }
 
+    func claimUnowned(by userID: UUID) throws {
+        let unowned = try context.fetch(FetchDescriptor<ReminderEntity>(predicate: #Predicate { $0.userID == nil }))
+        guard !unowned.isEmpty else { return }
+        for row in unowned { row.userID = userID }
+        try context.save()
+    }
+
     func reminder(id: UUID) throws -> Reminder? {
         try entity(id: id).flatMap { $0.deleted ? nil : $0.value }
     }

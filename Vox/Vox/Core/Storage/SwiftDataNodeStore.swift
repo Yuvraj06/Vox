@@ -115,6 +115,13 @@ final class SwiftDataNodeStore: NodeStore {
         SwiftDataNodeStore(container: try LocalDatabase.inMemory())
     }
 
+    func claimUnowned(by userID: UUID) throws {
+        let unowned = try context.fetch(FetchDescriptor<NodeEntity>(predicate: #Predicate { $0.userID == nil }))
+        guard !unowned.isEmpty else { return }
+        for row in unowned { row.userID = userID }
+        try context.save()
+    }
+
     func node(id: UUID) throws -> Node? {
         try entity(id: id).flatMap { $0.deleted ? nil : $0.value }
     }

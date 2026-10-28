@@ -368,6 +368,9 @@ final class RecordingNodeStore: NodeStore {
         try base.delete(id: id)
     }
 
+    /// Not part of a command, so nothing to remember.
+    func claimUnowned(by userID: UUID) throws { try base.claimUnowned(by: userID) }
+
     /// Only the first copy counts: that is how it looked before the command.
     private func remember(_ id: UUID, as node: Node?) {
         guard before.index(forKey: id) == nil else { return }

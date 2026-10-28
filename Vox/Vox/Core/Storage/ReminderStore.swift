@@ -10,6 +10,8 @@ protocol ReminderStore {
     func save(_ reminder: Reminder) throws
     /// Soft deletes it.
     func delete(id: UUID) throws
+    /// Rows made while signed out have no owner. Signing in gives them to that user.
+    func claimUnowned(by userID: UUID) throws
 }
 
 extension ReminderStore {

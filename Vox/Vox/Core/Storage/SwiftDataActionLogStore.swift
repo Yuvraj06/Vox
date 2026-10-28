@@ -62,6 +62,13 @@ final class SwiftDataActionLogStore: ActionLogStore {
         return try context.fetch(descriptor).map(\.value)
     }
 
+    func claimUnowned(by userID: UUID) throws {
+        let unowned = try context.fetch(FetchDescriptor<ActionLogEntity>(predicate: #Predicate { $0.userID == nil }))
+        guard !unowned.isEmpty else { return }
+        for row in unowned { row.userID = userID }
+        try context.save()
+    }
+
     func markUndone(id: UUID) throws {
         guard let entity = try entity(id: id) else { return }
         entity.undone = true

@@ -8,6 +8,7 @@ import SwiftUI
     @State private var gemini: GeminiSettings
     @State private var reminders: RemindersModel
     @State private var history: HistoryModel
+    @State private var auth: AuthModel
 
     init() {
         let container = Self.makeContainer()
@@ -43,6 +44,12 @@ import SwiftUI
         _thinking = State(initialValue: brain.thinking)
         _gemini = State(initialValue: gemini)
         _reminders = State(initialValue: reminders)
+        // Signing in gives everything made while signed out to that account.
+        _auth = State(initialValue: AuthModel { userID in
+            try? nodeStore.claimUnowned(by: userID)
+            try? reminderStore.claimUnowned(by: userID)
+            try? actionLog.claimUnowned(by: userID)
+        })
         _history = State(initialValue: HistoryModel(
             log: actionLog,
             ancestors: { id in nodeStore.ancestorIDs(of: id) },
@@ -59,6 +66,9 @@ import SwiftUI
                 .environment(gemini)
                 .environment(reminders)
                 .environment(history)
+                .environment(auth)
+                // The confirmation email's link opens Vox here.
+                .onOpenURL { url in Task { await auth.handle(url) } }
                 .task { await reminders.rescheduleAll() }
         }
     }

@@ -6,6 +6,7 @@ struct HomeView: View {
     @Environment(NotesModel.self) private var notes
     @Environment(RemindersModel.self) private var reminders
     @Environment(\.openNode) private var openNode
+    @Environment(AuthModel.self) private var auth
 
     @State private var editingReminder: Reminder?
     @State private var prompt: NodePrompt?
@@ -45,6 +46,10 @@ struct HomeView: View {
     }
 
     // MARK: Header
+
+    private var signedIn: Bool {
+        if case .signedIn = auth.state { true } else { false }
+    }
 
     /// TUESDAY, OCT 27 over a big "Vox", with Thinking and Add on the right.
     private var header: some View {
@@ -88,6 +93,11 @@ struct HomeView: View {
             // Menus tint their label with the accent color. Keep it white like the brain.
             .tint(.white)
             .accessibilityLabel("Add")
+            NavigationLink(value: Route.account) {
+                GlassCircleIcon(systemName: signedIn ? "person.crop.circle.fill" : "person.crop.circle")
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(signedIn ? "Account, signed in" : "Account")
         }
         .padding(.horizontal, 4)
         .padding(.top, 2)

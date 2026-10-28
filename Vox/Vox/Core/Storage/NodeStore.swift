@@ -13,6 +13,8 @@ protocol NodeStore {
     func update(_ node: Node) throws
     /// Soft deletes the node and everything below it.
     func delete(id: UUID) throws
+    /// Rows made while signed out have no owner. Signing in gives them to that user.
+    func claimUnowned(by userID: UUID) throws
 }
 
 extension NodeStore {
