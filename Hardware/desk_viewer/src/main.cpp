@@ -60,7 +60,7 @@ Settings settings;
 constexpr int TITLE_LEN = 40;
 constexpr int MAX_REMINDERS = 10;
 constexpr int MAX_ALARMS = 6;
-constexpr int MAX_DEADLINES = 8;
+constexpr int MAX_DEADLINES = 12;
 constexpr int MAX_TASKS = 6;
 
 enum Repeat : uint8_t { REPEAT_NONE, REPEAT_DAILY, REPEAT_WEEKLY };
@@ -329,9 +329,10 @@ bool fetchAll() {
     memcpy(next.alarms, alarms, sizeof(Timed) * next.alarmCount);
   }
 
-  // Deadlines today and tomorrow.
-  code = request("GET", "/rest/v1/nodes?select=title,due_at&kind=eq.item&deleted=eq.false&status=in.(todo,doing)"
-                 "&due_at=gte." + isoTime(today) + "&due_at=lt." + isoTime(midnightOf(now, 2)) + "&order=due_at.asc&limit=" + String(MAX_DEADLINES), "", reply);
+  // Everything with a time on it from today on, soonest first. Like the app: any item or note, task or not,
+  // as long as it is not done. Today and Tomorrow pick their days, the home countdown takes the next one.
+  code = request("GET", "/rest/v1/nodes?select=title,due_at&deleted=eq.false&or=(status.is.null,status.neq.done)"
+                 "&due_at=gte." + isoTime(today) + "&order=due_at.asc&limit=" + String(MAX_DEADLINES), "", reply);
   if (code != 200) return false;
   {
     JsonDocument doc;
