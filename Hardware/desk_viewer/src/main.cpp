@@ -1,14 +1,15 @@
 // Vox desk viewer.
-// Shows the clock, a countdown to the next alarm, upcoming reminders and the most important tasks.
-// When a task is ticked done anywhere (phone, website, here), it shows "Completed".
+// A resting face, the clock, Today, Tomorrow, what is coming up, and the important tasks,
+// straight from Supabase over Wi-Fi. When a task is ticked done anywhere, it shows "Completed".
 //
-// Data comes straight from Supabase over Wi-Fi, every few seconds.
-// The network work runs on its own core, so the clock and countdown never freeze.
+// Setup and settings live in an admin page the board serves itself (see portal.cpp).
+// It opens by itself when Wi-Fi is not set or will not connect, and when the sensor is held for 7 s.
 //
-// Touch sensor (TTP223):
-//   tap        -> next screen
-//   hold 1 s   -> on the Tasks screen: mark the top task done. Elsewhere: refresh now.
-//   tap while an alarm rings -> stop it
+// Touch (TTP223):
+//   tap              next screen
+//   hold 1 s         on Tasks: mark the top task done. Elsewhere: refresh now
+//   hold 7 s         open or close the setup page
+//   tap while ringing  stop the alarm
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -20,7 +21,18 @@
 #include <Adafruit_SSD1306.h>
 #include <time.h>
 
+#include "settings.h"
+#include "portal.h"
+
+#if __has_include("secrets.h")
 #include "secrets.h"
+#endif
+#ifndef SUPABASE_URL
+#define SUPABASE_URL "https://suzmgshfjscxzngcqjdh.supabase.co"
+#endif
+#ifndef SUPABASE_KEY
+#define SUPABASE_KEY "sb_publishable_fyjXegNWaquUwHkbk_TvRw_f8mBKU3H"
+#endif
 
 // ---------- Wiring ----------
 // OLED: VCC -> 3V3, GND -> GND, SDA -> GPIO21, SCL -> GPIO22
@@ -29,40 +41,47 @@ constexpr int OLED_SDA = 21;
 constexpr int OLED_SCL = 22;
 constexpr uint8_t OLED_ADDRESS = 0x3C;
 constexpr int TOUCH_PIN = 4;
-
-constexpr int SCREEN_W = 128;
-constexpr int SCREEN_H = 64;
+constexpr int W = 128, H = 64;
 
 // ---------- Timing ----------
-constexpr uint32_t FETCH_EVERY_MS = 10000;  // how often to ask Supabase
-constexpr uint32_t HOLD_MS = 1000;          // a press this long is a hold
-constexpr uint32_t BACK_HOME_MS = 60000;    // no touch this long -> back to the clock
-constexpr uint32_t DONE_SHOW_MS = 4000;     // how long "Completed" stays up
-constexpr uint32_t RING_MS = 60000;         // an alarm flashes this long unless tapped
+constexpr uint32_t FETCH_EVERY_MS = 10000;
+constexpr uint32_t WIFI_WAIT_MS = 10000;     // then the setup page opens
+constexpr uint32_t WIFI_RETRY_MS = 30000;    // while in setup, keep trying the saved Wi-Fi
+constexpr uint32_t HOLD_MS = 1000;
+constexpr uint32_t SETUP_HOLD_MS = 7000;
+constexpr uint32_t DONE_SHOW_MS = 4000;
+constexpr uint32_t RING_MS = 60000;
 
-Adafruit_SSD1306 display(SCREEN_W, SCREEN_H, &Wire, -1);
+Adafruit_SSD1306 display(W, H, &Wire, -1);
+Settings settings;
 
 // ---------- Data shared between the two cores ----------
 
 constexpr int TITLE_LEN = 40;
-constexpr int MAX_REMINDERS = 8;
+constexpr int MAX_REMINDERS = 10;
 constexpr int MAX_ALARMS = 6;
+constexpr int MAX_DEADLINES = 8;
 constexpr int MAX_TASKS = 6;
 
 enum Repeat : uint8_t { REPEAT_NONE, REPEAT_DAILY, REPEAT_WEEKLY };
 
 struct Timed {
   char title[TITLE_LEN];
-  time_t fireAt;    // first (or only) time, UTC seconds
+  time_t fireAt;
   Repeat repeat;
-  int weekday;      // for weekly: 0 = Sunday ... 6 = Saturday
+  int weekday;      // weekly: 0 = Sunday ... 6 = Saturday
+};
+
+struct Deadline {
+  char title[TITLE_LEN];
+  time_t due;
 };
 
 struct Task {
   char id[37];
   char title[TITLE_LEN];
   bool doing;
-  time_t due;       // 0 = no deadline
+  time_t due;       // 0 = none
 };
 
 struct Snapshot {
@@ -70,6 +89,8 @@ struct Snapshot {
   int reminderCount = 0;
   Timed alarms[MAX_ALARMS];
   int alarmCount = 0;
+  Deadline deadlines[MAX_DEADLINES];
+  int deadlineCount = 0;
   Task tasks[MAX_TASKS];
   int taskCount = 0;
   int doneToday = 0;
@@ -78,22 +99,21 @@ struct Snapshot {
 };
 
 SemaphoreHandle_t lock;
-Snapshot shared;  // written by the network core, read by the screen core
+Snapshot shared;
 
-// Tasks that just became done, waiting to be shown.
 constexpr int DONE_QUEUE = 4;
 char doneQueue[DONE_QUEUE][TITLE_LEN];
-int doneHead = 0;
-int doneTail = 0;
+int doneHead = 0, doneTail = 0;
 
-// Set by the screen core, handled by the network core.
 volatile bool refreshNow = false;
 volatile bool completeWanted = false;
 char completeID[37];
+volatile bool setupWanted = false;     // hold 7 s: open (or close) the setup page
+volatile bool reconnectWanted = false; // settings changed Wi-Fi or account
+volatile bool reloginWanted = false;
 
 // ---------- Small helpers ----------
 
-// Copies text the OLED font can draw. Emoji and accents are dropped.
 void copyTitle(char* out, const char* in) {
   int n = 0;
   for (const char* p = in ? in : ""; *p && n < TITLE_LEN - 1; p++) {
@@ -110,7 +130,6 @@ void setStatus(const char* text) {
   xSemaphoreGive(lock);
 }
 
-// Days since 1970-01-01 for a calendar date. Works without time zones.
 long daysFromCivil(int y, int m, int d) {
   y -= m <= 2;
   const long era = (y >= 0 ? y : y - 399) / 400;
@@ -136,7 +155,6 @@ time_t parseTime(const char* text) {
   return daysFromCivil(y, mo, d) * 86400L + h * 3600L + mi * 60L + s - offset;
 }
 
-// UTC seconds -> "2026-11-16T09:30:00Z", ready for a URL.
 String isoTime(time_t t) {
   struct tm utc;
   gmtime_r(&t, &utc);
@@ -145,7 +163,16 @@ String isoTime(time_t t) {
   return String(buf);
 }
 
-// Next time a reminder or alarm goes off after `after`. 0 if never again.
+time_t midnightOf(time_t t, int plusDays = 0) {
+  struct tm d;
+  localtime_r(&t, &d);
+  d.tm_mday += plusDays;
+  d.tm_hour = d.tm_min = d.tm_sec = 0;
+  d.tm_isdst = -1;
+  return mktime(&d);
+}
+
+// Next time a reminder goes off after `after`. 0 if never again.
 time_t nextFire(const Timed& t, time_t after) {
   if (t.repeat == REPEAT_NONE) return t.fireAt > after ? t.fireAt : 0;
   struct tm fire;
@@ -154,18 +181,24 @@ time_t nextFire(const Timed& t, time_t after) {
   struct tm day;
   localtime_r(&base, &day);
   for (int i = 0; i < 9; i++) {
-    struct tm candidate = day;
-    candidate.tm_mday += i;
-    candidate.tm_hour = fire.tm_hour;
-    candidate.tm_min = fire.tm_min;
-    candidate.tm_sec = 0;
-    candidate.tm_isdst = -1;
-    const time_t when = mktime(&candidate);
+    struct tm c = day;
+    c.tm_mday += i;
+    c.tm_hour = fire.tm_hour;
+    c.tm_min = fire.tm_min;
+    c.tm_sec = 0;
+    c.tm_isdst = -1;
+    const time_t when = mktime(&c);
     struct tm check;
     localtime_r(&when, &check);
     if (when > after && (t.repeat == REPEAT_DAILY || check.tm_wday == t.weekday)) return when;
   }
   return 0;
+}
+
+// The time it goes off on the day starting at `dayStart`, or 0.
+time_t fireOnDay(const Timed& t, time_t dayStart) {
+  const time_t when = nextFire(t, dayStart - 1);
+  return when && when < dayStart + 86400 ? when : 0;
 }
 
 bool sameDay(time_t a, time_t b) {
@@ -181,12 +214,10 @@ bool clockReady() { return time(nullptr) > 1700000000; }
 
 WiFiClientSecure tls;
 HTTPClient http;
-String accessToken;
-String refreshToken;
+String accessToken, refreshToken;
 time_t tokenExpires = 0;
-String doneCursor;  // newest "done" change already shown
+String doneCursor;
 
-// One request to Supabase. Returns the HTTP status, or a negative number when the network failed.
 int request(const char* method, const String& path, const String& body, String& reply) {
   http.setReuse(true);
   http.setTimeout(8000);
@@ -198,24 +229,23 @@ int request(const char* method, const String& path, const String& body, String& 
   const int code = http.sendRequest(method, body);
   reply = code > 0 ? http.getString() : "";
   http.end();
-  // A rejected token: sign in again next round.
   if (code == 401) accessToken = "";
   return code;
 }
 
-bool signIn() {
+bool signIn(const String& email, const String& password) {
+  if (!email.length() || !password.length()) { setStatus("No account"); return false; }
   setStatus("Signing in");
   accessToken = "";
   String reply;
   int code = -1;
-  // Try the saved refresh token first, then the password.
   if (refreshToken.length()) {
     code = request("POST", "/auth/v1/token?grant_type=refresh_token", "{\"refresh_token\":\"" + refreshToken + "\"}", reply);
   }
   if (code != 200) {
     JsonDocument body;
-    body["email"] = VOX_EMAIL;
-    body["password"] = VOX_PASSWORD;
+    body["email"] = email;
+    body["password"] = password;
     String text;
     serializeJson(body, text);
     code = request("POST", "/auth/v1/token?grant_type=password", text, reply);
@@ -223,6 +253,7 @@ bool signIn() {
   if (code != 200) {
     Serial.printf("Sign in failed (%d): %s\n", code, reply.c_str());
     setStatus(code > 0 ? "Login failed" : "Offline");
+    refreshToken = "";
     return false;
   }
   JsonDocument doc;
@@ -244,54 +275,49 @@ void readTimed(JsonObject row, Timed& out) {
     out.repeat = REPEAT_DAILY;
   } else if (strncmp(rule, "weekly:", 7) == 0) {
     static const char* days[] = {"sun", "mon", "tue", "wed", "thu", "fri", "sat"};
-    for (int i = 0; i < 7; i++) {
-      if (strcmp(rule + 7, days[i]) == 0) {
-        out.repeat = REPEAT_WEEKLY;
-        out.weekday = i;
-      }
-    }
+    for (int i = 0; i < 7; i++) if (strcmp(rule + 7, days[i]) == 0) { out.repeat = REPEAT_WEEKLY; out.weekday = i; }
   }
 }
 
-// Sorts by the next time each one goes off. Ones that never go off again are dropped.
+// Soonest next time first. Ones that went off today stay (shown dimmed on Today); older one-offs are dropped.
 int sortUpcoming(Timed* list, int count, time_t now) {
-  time_t when[MAX_REMINDERS > MAX_ALARMS ? MAX_REMINDERS : MAX_ALARMS];
+  const time_t today = midnightOf(now);
+  time_t when[32];
   int kept = 0;
   for (int i = 0; i < count; i++) {
-    const time_t next = nextFire(list[i], now);
-    if (!next) continue;
+    time_t next = nextFire(list[i], now);
+    if (!next) {
+      if (list[i].repeat != REPEAT_NONE || list[i].fireAt < today) continue;
+      next = list[i].fireAt;  // earlier today
+    }
     list[kept] = list[i];
     when[kept++] = next;
   }
-  for (int i = 1; i < kept; i++) {
-    for (int j = i; j > 0 && when[j] < when[j - 1]; j--) {
-      std::swap(when[j], when[j - 1]);
-      std::swap(list[j], list[j - 1]);
-    }
-  }
+  for (int i = 1; i < kept; i++)
+    for (int j = i; j > 0 && when[j] < when[j - 1]; j--) { std::swap(when[j], when[j - 1]); std::swap(list[j], list[j - 1]); }
   return kept;
 }
 
 bool fetchAll() {
   const time_t now = time(nullptr);
+  const time_t today = midnightOf(now);
   Snapshot next;
   String reply;
 
-  // Reminders and alarms still to come. Repeating ones are always kept.
-  const String upcoming = "or=(repeat_rule.not.is.null,fire_at.gte.%22" + isoTime(now) + "%22)";
-  int code = request("GET", "/rest/v1/reminders?select=title,fire_at,kind,repeat_rule&done=eq.false&deleted=eq.false&" +
-                     upcoming + "&order=fire_at.asc&limit=30", "", reply);
+  // Reminders and alarms: repeating ones, and one-offs from today on. Done one-offs that fired today still show.
+  int code = request("GET", "/rest/v1/reminders?select=title,fire_at,kind,repeat_rule&deleted=eq.false"
+                     "&or=(done.is.false,fire_at.gte.%22" + isoTime(today) + "%22)"
+                     "&or=(repeat_rule.not.is.null,fire_at.gte.%22" + isoTime(today) + "%22)&order=fire_at.asc&limit=40", "", reply);
   if (code != 200) return false;
   {
     JsonDocument doc;
     deserializeJson(doc, reply);
-    Timed reminders[30];
-    Timed alarms[30];
+    Timed reminders[32], alarms[32];
     int r = 0, a = 0;
     for (JsonObject row : doc.as<JsonArray>()) {
       const bool alarm = strcmp(row["kind"] | "", "alarm") == 0;
-      if (alarm && a < 30) readTimed(row, alarms[a++]);
-      if (!alarm && r < 30) readTimed(row, reminders[r++]);
+      if (alarm && a < 32) readTimed(row, alarms[a++]);
+      if (!alarm && r < 32) readTimed(row, reminders[r++]);
     }
     r = sortUpcoming(reminders, r, now);
     a = sortUpcoming(alarms, a, now);
@@ -299,6 +325,21 @@ bool fetchAll() {
     next.alarmCount = min(a, MAX_ALARMS);
     memcpy(next.reminders, reminders, sizeof(Timed) * next.reminderCount);
     memcpy(next.alarms, alarms, sizeof(Timed) * next.alarmCount);
+  }
+
+  // Deadlines today and tomorrow.
+  code = request("GET", "/rest/v1/nodes?select=title,due_at&kind=eq.item&deleted=eq.false&status=in.(todo,doing)"
+                 "&due_at=gte." + isoTime(today) + "&due_at=lt." + isoTime(midnightOf(now, 2)) + "&order=due_at.asc&limit=" + String(MAX_DEADLINES), "", reply);
+  if (code != 200) return false;
+  {
+    JsonDocument doc;
+    deserializeJson(doc, reply);
+    for (JsonObject row : doc.as<JsonArray>()) {
+      if (next.deadlineCount >= MAX_DEADLINES) break;
+      Deadline& d = next.deadlines[next.deadlineCount++];
+      copyTitle(d.title, row["title"] | "");
+      d.due = parseTime(row["due_at"] | "");
+    }
   }
 
   // Important tasks: soonest deadline first, then ones in progress.
@@ -310,20 +351,16 @@ bool fetchAll() {
     deserializeJson(doc, reply);
     for (JsonObject row : doc.as<JsonArray>()) {
       if (next.taskCount >= MAX_TASKS) break;
-      Task& task = next.tasks[next.taskCount++];
-      strlcpy(task.id, row["id"] | "", sizeof task.id);
-      copyTitle(task.title, row["title"] | "");
-      task.doing = strcmp(row["status"] | "", "doing") == 0;
-      task.due = parseTime(row["due_at"] | "");
+      Task& t = next.tasks[next.taskCount++];
+      strlcpy(t.id, row["id"] | "", sizeof t.id);
+      copyTitle(t.title, row["title"] | "");
+      t.doing = strcmp(row["status"] | "", "doing") == 0;
+      t.due = parseTime(row["due_at"] | "");
     }
   }
 
-  // Tasks done since midnight.
-  struct tm midnight;
-  localtime_r(&now, &midnight);
-  midnight.tm_hour = midnight.tm_min = midnight.tm_sec = 0;
-  code = request("GET", "/rest/v1/nodes?select=id&kind=eq.item&deleted=eq.false&status=eq.done&updated_at=gte." +
-                 isoTime(mktime(&midnight)) + "&limit=200", "", reply);
+  // Done since midnight.
+  code = request("GET", "/rest/v1/nodes?select=id&kind=eq.item&deleted=eq.false&status=eq.done&updated_at=gte." + isoTime(today) + "&limit=200", "", reply);
   if (code != 200) return false;
   {
     JsonDocument doc;
@@ -331,12 +368,11 @@ bool fetchAll() {
     next.doneToday = doc.as<JsonArray>().size();
   }
 
-  // Tasks that became done since the last look. The first look only sets the bookmark.
+  // Newly done since the last look, for the "Completed" screen. The first look only sets the bookmark.
   if (doneCursor.isEmpty()) doneCursor = isoTime(now);
   String cursor = doneCursor;
   cursor.replace("+", "%2B");
-  code = request("GET", "/rest/v1/nodes?select=title,updated_at&kind=eq.item&deleted=eq.false&status=eq.done&updated_at=gt." +
-                 cursor + "&order=updated_at.asc&limit=4", "", reply);
+  code = request("GET", "/rest/v1/nodes?select=title,updated_at&kind=eq.item&deleted=eq.false&status=eq.done&updated_at=gt." + cursor + "&order=updated_at.asc&limit=4", "", reply);
   if (code != 200) return false;
   {
     JsonDocument doc;
@@ -359,12 +395,10 @@ bool fetchAll() {
   return true;
 }
 
-// Marks a task done the same way the phone does:
-// a card on a board moves to its board's first Done column, and its reminders are cancelled.
+// Same as ticking it on the phone: a board card moves to its board's first Done column, reminders are cancelled.
 void completeTask(const String& id) {
   setStatus("Saving");
-  String reply;
-  String newParent;
+  String reply, newParent;
   if (request("GET", "/rest/v1/nodes?select=parent_id&id=eq." + id, "", reply) != 200) return;
   JsonDocument card;
   deserializeJson(card, reply);
@@ -375,8 +409,7 @@ void completeTask(const String& id) {
     const char* type = column[0]["column_type"] | "";
     const char* board = column[0]["parent_id"] | "";
     if (*type && strcmp(type, "done") != 0 && *board &&
-        request("GET", "/rest/v1/nodes?select=id&parent_id=eq." + String(board) +
-                "&column_type=eq.done&deleted=eq.false&order=position.asc&limit=1", "", reply) == 200) {
+        request("GET", "/rest/v1/nodes?select=id&parent_id=eq." + String(board) + "&column_type=eq.done&deleted=eq.false&order=position.asc&limit=1", "", reply) == 200) {
       JsonDocument done;
       deserializeJson(done, reply);
       newParent = done[0]["id"] | "";
@@ -388,35 +421,85 @@ void completeTask(const String& id) {
   body += "}";
   const int code = request("PATCH", "/rest/v1/nodes?id=eq." + id, body, reply);
   Serial.printf("Complete %s -> %d\n", id.c_str(), code);
-  request("PATCH", "/rest/v1/reminders?node_id=eq." + id + "&done=eq.false",
-          "{\"done\":true,\"updated_at\":\"" + stamp + "\"}", reply);
+  request("PATCH", "/rest/v1/reminders?node_id=eq." + id + "&done=eq.false", "{\"done\":true,\"updated_at\":\"" + stamp + "\"}", reply);
+}
+
+// Settings are read on this core through a copy taken under the lock.
+Settings netSettings;
+void copySettings() {
+  xSemaphoreTake(lock, portMAX_DELAY);
+  netSettings = settings;
+  xSemaphoreGive(lock);
 }
 
 void networkTask(void*) {
-  tls.setInsecure();  // skips certificate checks; fine for a desk gadget
+  tls.setInsecure();  // no certificate check; fine for a desk gadget
   WiFi.mode(WIFI_STA);
-  uint32_t lastFetch = 0;
-  bool fetchedOnce = false;
+  WiFi.setAutoReconnect(true);
+  copySettings();
+  uint32_t lastFetch = 0, lastWiFiTry = 0, apSince = 0;
+  bool fetchedOnce = false, connecting = false, portalByUser = false;
+
   for (;;) {
-    if (WiFi.status() != WL_CONNECTED) {
-      setStatus("Wi-Fi...");
-      WiFi.begin(WIFI_SSID, WIFI_PASS);
-      for (int i = 0; i < 60 && WiFi.status() != WL_CONNECTED; i++) vTaskDelay(pdMS_TO_TICKS(250));
-      if (WiFi.status() != WL_CONNECTED) {
-        setStatus("No Wi-Fi");
-        vTaskDelay(pdMS_TO_TICKS(3000));
+    if (reconnectWanted) {
+      reconnectWanted = false;
+      copySettings();
+      WiFi.disconnect();
+      connecting = false;
+      lastWiFiTry = 0;
+    }
+    if (reloginWanted) {
+      reloginWanted = false;
+      copySettings();
+      accessToken = "";
+      refreshToken = "";
+      fetchedOnce = false;
+    }
+    if (setupWanted) {
+      setupWanted = false;
+      if (portalAPOpen() && portalByUser) { portalCloseAP(); portalByUser = false; }
+      else { portalOpenAP(); portalByUser = true; apSince = millis(); }
+    }
+
+    const bool wifiUp = WiFi.status() == WL_CONNECTED;
+    if (!wifiUp) {
+      if (!netSettings.hasWiFi()) {
+        if (!portalAPOpen()) { portalOpenAP(); apSince = millis(); }
+        setStatus("Setup");
+        vTaskDelay(pdMS_TO_TICKS(500));
         continue;
       }
-      Serial.printf("Wi-Fi up: %s\n", WiFi.localIP().toString().c_str());
-      configTzTime(TIME_ZONE, "pool.ntp.org", "time.google.com");
+      if (!connecting && millis() - lastWiFiTry >= (portalAPOpen() ? WIFI_RETRY_MS : 0)) {
+        setStatus("Wi-Fi...");
+        WiFi.begin(netSettings.wifiSSID.c_str(), netSettings.wifiPass.c_str());
+        connecting = true;
+        lastWiFiTry = millis();
+      }
+      if (connecting && millis() - lastWiFiTry > WIFI_WAIT_MS) {
+        connecting = false;
+        if (!portalAPOpen()) { portalOpenAP(); apSince = millis(); }
+        setStatus("Setup");
+      }
+      vTaskDelay(pdMS_TO_TICKS(250));
+      continue;
     }
+
+    if (connecting) {
+      connecting = false;
+      Serial.printf("Wi-Fi up: %s\n", WiFi.localIP().toString().c_str());
+      configTzTime(netSettings.timeZone.c_str(), "pool.ntp.org", "time.google.com");
+    }
+    // Connected again: close the automatic setup network once nobody is using it.
+    if (portalAPOpen() && !portalByUser && millis() - apSince > 60000 && WiFi.softAPgetStationNum() == 0) portalCloseAP();
+
     if (!clockReady()) {
       setStatus("Clock...");
       vTaskDelay(pdMS_TO_TICKS(500));
       continue;
     }
     if (accessToken.isEmpty() || time(nullptr) > tokenExpires - 120) {
-      if (!signIn()) {
+      if (!signIn(netSettings.email, netSettings.password)) {
+        if (!netSettings.hasAccount() && !portalAPOpen()) { portalOpenAP(); apSince = millis(); }
         vTaskDelay(pdMS_TO_TICKS(10000));
         continue;
       }
@@ -438,10 +521,8 @@ void networkTask(void*) {
 
 // ---------- Screen (main core) ----------
 
-enum Page { PAGE_HOME, PAGE_ALARM, PAGE_REMINDERS, PAGE_TASKS, PAGE_COUNT };
-
-Page page = PAGE_HOME;
-Snapshot view;  // the screen's own copy of `shared`
+int page = SCR_FACE;
+Snapshot view;
 uint32_t lastTouch = 0;
 
 char doneTitle[TITLE_LEN];
@@ -456,41 +537,34 @@ time_t ringCheckedUntil = 0;
 void centered(const char* text, int y, int size) {
   display.setTextSize(size);
   const int width = strlen(text) * 6 * size;
-  display.setCursor(max(0, (SCREEN_W - width) / 2), y);
+  display.setCursor(max(0, (W - width) / 2), y);
   display.print(text);
 }
 
-// Cuts text to fit `chars` characters, with ".." when it was longer.
 String fit(const char* text, int chars) {
   String s(text);
   if ((int)s.length() <= chars) return s;
   return s.substring(0, chars - 2) + "..";
 }
 
-void header(const char* title) {
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.print(title);
-  for (int i = 0; i < PAGE_COUNT; i++) {
-    const int x = SCREEN_W - (PAGE_COUNT - i) * 7 + 2;
-    if (i == page) display.fillCircle(x, 3, 2, SSD1306_WHITE);
-    else display.drawCircle(x, 3, 2, SSD1306_WHITE);
-  }
-  display.drawFastHLine(0, 10, SCREEN_W, SSD1306_WHITE);
+String clockText(time_t when) {
+  struct tm t;
+  localtime_r(&when, &t);
+  char buf[8];
+  strftime(buf, sizeof buf, settings.clock24 ? "%H:%M" : "%I:%M", &t);
+  String s(buf);
+  if (!settings.clock24 && s[0] == '0') s = s.substring(1);
+  return s;
 }
 
-// "07:42:10" under a day, "2d 07:42" above it.
 String countdown(long seconds) {
   char buf[16];
-  if (seconds < 86400) {
-    snprintf(buf, sizeof buf, "%02ld:%02ld:%02ld", seconds / 3600, seconds / 60 % 60, seconds % 60);
-  } else {
-    snprintf(buf, sizeof buf, "%ldd %02ld:%02ld", seconds / 86400, seconds / 3600 % 24, seconds / 60 % 60);
-  }
+  if (seconds < 0) seconds = 0;
+  if (seconds < 86400) snprintf(buf, sizeof buf, "%02ld:%02ld:%02ld", seconds / 3600, seconds / 60 % 60, seconds % 60);
+  else snprintf(buf, sizeof buf, "%ldd %02ld:%02ld", seconds / 86400, seconds / 3600 % 24, seconds / 60 % 60);
   return String(buf);
 }
 
-// "Tdy", "Tmr" or a weekday like "Fri".
 String dayLabel(time_t when, time_t now) {
   if (sameDay(when, now)) return "Tdy";
   if (sameDay(when, now + 86400)) return "Tmr";
@@ -501,12 +575,53 @@ String dayLabel(time_t when, time_t now) {
   return String(buf);
 }
 
-String clockText(time_t when) {
-  struct tm t;
-  localtime_r(&when, &t);
-  char buf[8];
-  strftime(buf, sizeof buf, "%H:%M", &t);
-  return String(buf);
+// Little page dots, top right.
+void header(const char* title) {
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print(title);
+  int shown = 0, index = 0;
+  for (int i = 0; i < SCR_COUNT; i++) if (settings.shows((Screen)i)) { if (i == page) index = shown; shown++; }
+  for (int i = 0; i < shown; i++) {
+    const int x = W - (shown - i) * 7 + 2;
+    if (i == index) display.fillCircle(x, 3, 2, SSD1306_WHITE);
+    else display.drawCircle(x, 3, 2, SSD1306_WHITE);
+  }
+  display.drawFastHLine(0, 10, W, SSD1306_WHITE);
+}
+
+// One thing on the clock, for Today, Tomorrow and Upcoming.
+struct Entry {
+  time_t when;
+  char kind;  // 'r' reminder, 'a' alarm, 'd' deadline
+  const char* title;
+};
+
+int entriesOn(time_t dayStart, Entry* out, int max) {
+  int n = 0;
+  for (int i = 0; i < view.reminderCount && n < max; i++) { const time_t w = fireOnDay(view.reminders[i], dayStart); if (w) out[n++] = {w, 'r', view.reminders[i].title}; }
+  for (int i = 0; i < view.alarmCount && n < max; i++) { const time_t w = fireOnDay(view.alarms[i], dayStart); if (w) out[n++] = {w, 'a', view.alarms[i].title}; }
+  for (int i = 0; i < view.deadlineCount && n < max; i++) { const time_t d = view.deadlines[i].due; if (d >= dayStart && d < dayStart + 86400) out[n++] = {d, 'd', view.deadlines[i].title}; }
+  for (int i = 1; i < n; i++) for (int j = i; j > 0 && out[j].when < out[j - 1].when; j--) std::swap(out[j], out[j - 1]);
+  return n;
+}
+
+int entriesUpcoming(time_t now, Entry* out, int max) {
+  int n = 0;
+  for (int i = 0; i < view.reminderCount && n < max; i++) { const time_t w = nextFire(view.reminders[i], now); if (w) out[n++] = {w, 'r', view.reminders[i].title}; }
+  for (int i = 0; i < view.alarmCount && n < max; i++) { const time_t w = nextFire(view.alarms[i], now); if (w) out[n++] = {w, 'a', view.alarms[i].title}; }
+  for (int i = 0; i < view.deadlineCount && n < max; i++) { const time_t d = view.deadlines[i].due; if (d > now) out[n++] = {d, 'd', view.deadlines[i].title}; }
+  for (int i = 1; i < n; i++) for (int j = i; j > 0 && out[j].when < out[j - 1].when; j--) std::swap(out[j], out[j - 1]);
+  return n;
+}
+
+// Small glyph for the kind of entry: bell, alarm ring, flag.
+void kindGlyph(int x, int y, char kind) {
+  switch (kind) {
+    case 'a': display.drawCircle(x + 3, y + 4, 3, SSD1306_WHITE); display.drawPixel(x + 3, y + 3, SSD1306_WHITE); display.drawPixel(x + 4, y + 4, SSD1306_WHITE); break;
+    case 'd': display.drawFastVLine(x + 1, y + 1, 7, SSD1306_WHITE); display.fillRect(x + 2, y + 1, 4, 3, SSD1306_WHITE); break;
+    default:  display.drawRoundRect(x + 1, y + 1, 5, 5, 2, SSD1306_WHITE); display.drawFastHLine(x, y + 6, 7, SSD1306_WHITE); display.drawPixel(x + 3, y + 7, SSD1306_WHITE); break;
+  }
 }
 
 const Timed* nextAlarm(time_t now, time_t* when) {
@@ -514,15 +629,84 @@ const Timed* nextAlarm(time_t now, time_t* when) {
   *when = 0;
   for (int i = 0; i < view.alarmCount; i++) {
     const time_t next = nextFire(view.alarms[i], now);
-    if (next && (!best || next < *when)) {
-      best = &view.alarms[i];
-      *when = next;
-    }
+    if (next && (!best || next < *when)) { best = &view.alarms[i]; *when = next; }
   }
   return best;
 }
 
-void drawHome(time_t now) {
+// ----- Face -----
+// Two soft rounded eyes that blink and look around. Sleepy late at night. Big smile after a task is done.
+struct Face {
+  float lookX = 0, lookY = 0, targetX = 0, targetY = 0;
+  uint32_t nextLook = 0, blinkAt = 0, happyUntil = 0;
+} face;
+
+void drawFace(uint32_t ms, time_t now) {
+  struct tm t;
+  localtime_r(&now, &t);
+  const bool sleepy = t.tm_hour >= 23 || t.tm_hour < 6;
+  const bool happy = ms < face.happyUntil;
+
+  if (ms > face.nextLook) {
+    face.targetX = random(-8, 9);
+    face.targetY = random(-4, 5);
+    face.nextLook = ms + random(1500, 4500);
+  }
+  face.lookX += (face.targetX - face.lookX) * 0.15f;
+  face.lookY += (face.targetY - face.lookY) * 0.15f;
+  if (ms > face.blinkAt + 160) face.blinkAt = ms + random(2500, 6000);
+  const bool blink = ms >= face.blinkAt && ms < face.blinkAt + 160;
+
+  const int cx = 64, cy = 28;
+  const int ex = 22, eyeW = 16, eyeH = sleepy ? 3 : (happy ? 6 : 18);
+  for (int side = -1; side <= 1; side += 2) {
+    const int x = cx + side * ex + (int)face.lookX - eyeW / 2;
+    const int y = cy + (int)face.lookY - eyeH / 2;
+    if (blink || sleepy) {
+      display.fillRoundRect(x, cy + (int)face.lookY - 1, eyeW, 3, 1, SSD1306_WHITE);
+    } else if (happy) {
+      // Arched happy eyes.
+      for (int i = 0; i < eyeW; i++) {
+        const float u = (i - eyeW / 2.0f) / (eyeW / 2.0f);
+        const int yy = y + eyeH - (int)((1 - u * u) * eyeH);
+        display.fillRect(x + i, yy, 1, 3, SSD1306_WHITE);
+      }
+    } else {
+      display.fillRoundRect(x, y, eyeW, eyeH, 5, SSD1306_WHITE);
+    }
+  }
+  // Mouth.
+  const int my = cy + 20;
+  const int mw = happy ? 22 : 10, depth = happy ? 7 : 3;
+  for (int i = -mw / 2; i <= mw / 2; i++) {
+    const float u = (float)i / (mw / 2.0f);
+    const int yy = my + (int)((1 - u * u) * depth);
+    display.drawPixel(cx + i + (int)(face.lookX / 2), yy, SSD1306_WHITE);
+    if (happy) display.drawPixel(cx + i + (int)(face.lookX / 2), yy + 1, SSD1306_WHITE);
+  }
+  if (sleepy) {
+    display.setTextSize(1);
+    const int phase = (ms / 700) % 3;
+    for (int i = 0; i <= phase; i++) { display.setCursor(96 + i * 7, 22 - i * 7); display.print("z"); }
+  }
+  // Small clock top right, status top left when something is wrong.
+  display.setTextSize(1);
+  const String clock = clockText(now);
+  display.setCursor(W - clock.length() * 6, 0);
+  display.print(clock);
+  if (strcmp(view.status, "Live") != 0) { display.setCursor(0, 0); display.print(view.status); }
+  // Hint if something is within the hour.
+  time_t when;
+  Entry e[1];
+  if (entriesUpcoming(now, e, 1) && e[0].when - now < 3600) {
+    const String line = String(e[0].kind == 'a' ? "Alarm " : e[0].kind == 'd' ? "Due " : "") + countdown(e[0].when - now);
+    display.setCursor(0, 56);
+    display.print(line);
+  }
+  (void)when;
+}
+
+void drawClock(time_t now) {
   struct tm t;
   localtime_r(&now, &t);
   char buf[24];
@@ -530,68 +714,76 @@ void drawHome(time_t now) {
   strftime(buf, sizeof buf, "%a %d %b", &t);
   display.setCursor(0, 0);
   display.print(buf);
-  // Status on the right: "Live" or what is wrong.
-  display.setCursor(SCREEN_W - strlen(view.status) * 6, 0);
+  display.setCursor(W - strlen(view.status) * 6, 0);
   display.print(view.status);
 
-  strftime(buf, sizeof buf, "%H:%M", &t);
-  centered(buf, 13, 3);
-
+  centered(clockText(now).c_str(), 13, 3);
   display.setTextSize(1);
   time_t when;
   const Timed* alarm = nextAlarm(now, &when);
   const String line = alarm ? "Alarm in " + countdown(when - now) : String("No alarm set");
   centered(line.c_str(), 42, 1);
-
-  int open = view.taskCount;
-  snprintf(buf, sizeof buf, "%d done  %d%s to do", view.doneToday, open, open >= MAX_TASKS ? "+" : "");
+  snprintf(buf, sizeof buf, "%d done  %d%s to do", view.doneToday, view.taskCount, view.taskCount >= MAX_TASKS ? "+" : "");
   centered(buf, 55, 1);
 }
 
-void drawAlarm(time_t now) {
-  header("NEXT ALARM");
-  time_t when;
-  const Timed* alarm = nextAlarm(now, &when);
-  if (!alarm) {
-    centered("No alarms", 26, 1);
-    centered("Set one on the phone", 42, 1);
-    return;
+void drawDay(const char* title, time_t dayStart, time_t now) {
+  header(title);
+  Entry e[16];
+  const int n = entriesOn(dayStart, e, 16);
+  if (n == 0) { centered("Nothing planned", 30, 1); return; }
+  display.setTextSize(1);
+  // Start from the next thing still to come, so the past does not push it off screen.
+  int first = 0;
+  while (first < n && e[first].when < now && n - first > 4) first++;
+  for (int i = first, row = 0; i < n && row < 4; i++, row++) {
+    const int y = 14 + row * 12;
+    const bool past = e[i].when < now;
+    kindGlyph(0, y - 1, e[i].kind);
+    display.setCursor(10, y);
+    display.print(clockText(e[i].when));
+    display.setCursor(48, y);
+    display.print(fit(e[i].title, 13));
+    if (past) {
+      // Strike through what already went off.
+      display.drawFastHLine(48, y + 3, 78, SSD1306_WHITE);
+    }
   }
-  centered(countdown(when - now).c_str(), 18, 2);
-  centered(fit(alarm->title, 21).c_str(), 40, 1);
-  const String at = dayLabel(when, now) + " " + clockText(when);
-  centered(at.c_str(), 53, 1);
+  if (n - first > 4) { display.setCursor(W - 24, 56); display.printf("+%d", n - first - 4); }
 }
 
-void drawReminders(time_t now) {
-  header("REMINDERS");
-  if (view.reminderCount == 0) {
-    centered("Nothing coming up", 30, 1);
-    return;
-  }
+void drawUpcoming(time_t now) {
+  header("UPCOMING");
+  Entry e[8];
+  const int n = entriesUpcoming(now, e, 8);
+  if (n == 0) { centered("Nothing coming up", 26, 1); centered("Add one on the phone", 42, 1); return; }
+  centered(countdown(e[0].when - now).c_str(), 14, 2);
   display.setTextSize(1);
-  for (int i = 0; i < view.reminderCount && i < 4; i++) {
-    const time_t when = nextFire(view.reminders[i], now);
-    const int y = 14 + i * 12;
-    display.setCursor(0, y);
-    display.print(dayLabel(when, now) + " " + clockText(when));
-    display.setCursor(60, y);
-    display.print(fit(view.reminders[i].title, 11));
+  kindGlyph(0, 32, e[0].kind);
+  display.setCursor(10, 33);
+  display.print(fit(e[0].title, 13));
+  const String at = dayLabel(e[0].when, now) + " " + clockText(e[0].when);
+  display.setCursor(W - at.length() * 6, 33);
+  display.print(at);
+  display.drawFastHLine(0, 43, W, SSD1306_WHITE);
+  for (int i = 1; i < n && i < 3; i++) {
+    const int y = 46 + (i - 1) * 10;
+    kindGlyph(0, y - 1, e[i].kind);
+    display.setCursor(10, y);
+    display.print(dayLabel(e[i].when, now) + " " + clockText(e[i].when));
+    display.setCursor(66, y);
+    display.print(fit(e[i].title, 10));
   }
 }
 
 void drawTasks(time_t now) {
   header("TASKS");
-  if (view.taskCount == 0) {
-    centered("All clear!", 30, 1);
-    return;
-  }
+  if (view.taskCount == 0) { centered("All clear!", 30, 1); return; }
   display.setTextSize(1);
   for (int i = 0; i < view.taskCount && i < 4; i++) {
     const Task& task = view.tasks[i];
     const int y = 14 + i * 12;
-    // The top task is the one a hold marks done, so it is highlighted.
-    if (i == 0) display.fillRect(0, y - 2, SCREEN_W, 11, SSD1306_WHITE);
+    if (i == 0) display.fillRect(0, y - 2, W, 11, SSD1306_WHITE);
     display.setTextColor(i == 0 ? SSD1306_BLACK : SSD1306_WHITE);
     const bool late = task.due && task.due < now;
     display.setCursor(1, y);
@@ -599,16 +791,13 @@ void drawTasks(time_t now) {
     display.setCursor(9, y);
     String due = task.due ? (late ? String("late") : dayLabel(task.due, now)) : String("");
     display.print(fit(task.title, due.length() ? 15 : 19));
-    if (due.length()) {
-      display.setCursor(SCREEN_W - due.length() * 6 - 1, y);
-      display.print(due);
-    }
+    if (due.length()) { display.setCursor(W - due.length() * 6 - 1, y); display.print(due); }
     display.setTextColor(SSD1306_WHITE);
   }
+  if (view.taskCount > 4) { display.setCursor(W - 24, 56); display.printf("+%d", view.taskCount - 4); }
 }
 
 void drawDone() {
-  // A ring with a tick, then the task name.
   display.drawCircle(18, 32, 14, SSD1306_WHITE);
   display.drawCircle(18, 32, 13, SSD1306_WHITE);
   for (int d = 0; d < 2; d++) {
@@ -619,7 +808,6 @@ void drawDone() {
   display.setCursor(40, 14);
   display.print("COMPLETED");
   display.drawFastHLine(40, 24, 54, SSD1306_WHITE);
-  // Up to three lines of 14 characters.
   String title(doneTitle);
   for (int line = 0; line < 3 && title.length(); line++) {
     display.setCursor(40, 30 + line * 10);
@@ -634,14 +822,42 @@ void drawRinging() {
   centered("tap to stop", 52, 1);
 }
 
-// A bar along the bottom fills up while the sensor is held.
-void drawHoldBar(uint32_t heldFor) {
-  if (heldFor < 250) return;
-  const int width = (heldFor > HOLD_MS ? HOLD_MS : heldFor) * SCREEN_W / HOLD_MS;
-  display.fillRect(0, SCREEN_H - 2, width, 2, SSD1306_WHITE);
+void drawSetup() {
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("SETUP");
+  display.drawFastHLine(0, 10, W, SSD1306_WHITE);
+  if (portalAPOpen()) {
+    display.setCursor(0, 14); display.print("Join Wi-Fi:");
+    display.setCursor(0, 24); display.print(" " + portalAPName());
+    display.setCursor(0, 36); display.print("then open:");
+    display.setCursor(0, 46); display.print(" " + WiFi.softAPIP().toString());
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    display.setCursor(0, 56);
+    display.print("or " + WiFi.localIP().toString());
+  }
 }
 
-// Starts ringing when an alarm's time passes.
+// A bar along the bottom fills while the sensor is held: 1 s for the hold action, then on to 7 s for setup.
+void drawHoldBar(uint32_t heldFor) {
+  if (heldFor < 200) return;
+  if (heldFor < HOLD_MS) {
+    display.fillRect(0, H - 2, heldFor * W / HOLD_MS, 2, SSD1306_WHITE);
+  } else {
+    display.fillRect(0, H - 2, W, 2, SSD1306_WHITE);
+    const int w = (heldFor - HOLD_MS) * W / (SETUP_HOLD_MS - HOLD_MS);
+    display.fillRect(0, H - 5, w, 2, SSD1306_WHITE);
+    if (heldFor > HOLD_MS + 600) {
+      display.setTextSize(1);
+      const String s = "setup in " + String((SETUP_HOLD_MS - heldFor) / 1000 + 1);
+      display.fillRect(W - s.length() * 6 - 2, H - 16, s.length() * 6 + 2, 9, SSD1306_BLACK);
+      display.setCursor(W - s.length() * 6, H - 15);
+      display.print(s);
+    }
+  }
+}
+
 void checkAlarms(time_t now) {
   if (!ringCheckedUntil) ringCheckedUntil = now;
   for (int i = 0; i < view.alarmCount && !ringing; i++) {
@@ -655,20 +871,25 @@ void checkAlarms(time_t now) {
   ringCheckedUntil = now;
 }
 
+int nextPage(int from) {
+  for (int i = 1; i <= SCR_COUNT; i++) {
+    const int p = (from + i) % SCR_COUNT;
+    if (settings.shows((Screen)p)) return p;
+  }
+  return from;
+}
+
+bool showingSetup = false;
+
 void onTap() {
-  if (ringing) {
-    ringing = false;
-    return;
-  }
-  if (doneShowing) {
-    doneShowing = false;
-    return;
-  }
-  page = Page((page + 1) % PAGE_COUNT);
+  if (ringing) { ringing = false; return; }
+  if (doneShowing) { doneShowing = false; return; }
+  if (showingSetup) { showingSetup = false; return; }
+  page = nextPage(page);
 }
 
 void onHold() {
-  if (page == PAGE_TASKS && view.taskCount > 0 && !completeWanted) {
+  if (page == SCR_TASKS && view.taskCount > 0 && !completeWanted) {
     strlcpy(completeID, view.tasks[0].id, sizeof completeID);
     completeWanted = true;
   } else {
@@ -676,47 +897,76 @@ void onHold() {
   }
 }
 
+void applyDisplaySettings() {
+  display.setRotation(settings.flip ? 2 : 0);
+  display.ssd1306_command(SSD1306_SETCONTRAST);
+  display.ssd1306_command(settings.brightness);
+  if (!settings.shows((Screen)page)) page = settings.idle;
+}
+
 void setup() {
   Serial.begin(115200);
   pinMode(TOUCH_PIN, INPUT);
+  lock = xSemaphoreCreateMutex();
+  settingsLoad(settings);
+  page = settings.idle;
+
   Wire.begin(OLED_SDA, OLED_SCL);
   if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
     Serial.println("OLED not found. Check SDA/SCL wiring and the address (0x3C or 0x3D).");
   }
+  applyDisplaySettings();
   display.setTextColor(SSD1306_WHITE);
   display.clearDisplay();
   centered("VOX", 18, 3);
   centered("desk viewer", 48, 1);
   display.display();
 
-  lock = xSemaphoreCreateMutex();
-  // Network work on core 0. The screen loop stays on core 1.
+  portalBegin(&settings);
   xTaskCreatePinnedToCore(networkTask, "network", 16384, nullptr, 1, nullptr, 0);
 }
 
 void loop() {
   static bool wasDown = false;
   static uint32_t downAt = 0;
-  static bool holdFired = false;
+  static bool holdArmed = false, setupFired = false;
 
-  // Touch: the TTP223 output is HIGH while touched.
+  // Touch. The TTP223 output is HIGH while touched.
   const bool down = digitalRead(TOUCH_PIN) == HIGH;
   const uint32_t ms = millis();
-  if (down && !wasDown) {
-    downAt = ms;
-    holdFired = false;
-    lastTouch = ms;
+  if (down && !wasDown) { downAt = ms; holdArmed = false; setupFired = false; lastTouch = ms; }
+  const uint32_t heldFor = down ? ms - downAt : 0;
+  if (down && heldFor >= HOLD_MS && !ringing) holdArmed = true;
+  if (down && heldFor >= SETUP_HOLD_MS && !setupFired) {
+    setupFired = true;
+    setupWanted = true;
+    showingSetup = !showingSetup || !portalAPOpen();
   }
-  if (down && !holdFired && ms - downAt >= HOLD_MS && !ringing) {
-    holdFired = true;
-    onHold();
+  if (!down && wasDown) {
+    const uint32_t held = ms - downAt;
+    if (setupFired) {}                                  // already handled
+    else if (holdArmed) onHold();                       // 1 s to 7 s: hold action on release
+    else if (held > 30) onTap();
   }
-  if (!down && wasDown && !holdFired && ms - downAt > 30) onTap();
   wasDown = down;
 
-  if (page != PAGE_HOME && ms - lastTouch > BACK_HOME_MS) page = PAGE_HOME;
+  if (page != settings.idle && !showingSetup && ms - lastTouch > settings.idleAfter * 1000UL) page = settings.idle;
 
-  // Take a fresh copy of the data and any newly done task.
+  // The admin page and anything it changed.
+  PortalStatus ps;
+  ps.wifi = WiFi.status() == WL_CONNECTED ? "Connected to " + WiFi.SSID() + " (" + WiFi.localIP().toString() + ")" : "Not connected";
+  ps.account = view.status;
+  portalLoop(ps);
+  bool wifiChanged = false, accountChanged = false;
+  if (portalTakeSaved(&wifiChanged, &accountChanged)) {
+    applyDisplaySettings();
+    configTzTime(settings.timeZone.c_str(), "pool.ntp.org", "time.google.com");
+    if (wifiChanged) reconnectWanted = true;
+    if (accountChanged) reloginWanted = true;
+    showingSetup = false;
+  }
+  if (portalTakeRestart()) { delay(300); ESP.restart(); }
+
   xSemaphoreTake(lock, portMAX_DELAY);
   view = shared;
   if (!doneShowing && doneHead != doneTail) {
@@ -724,6 +974,7 @@ void loop() {
     doneHead = (doneHead + 1) % DONE_QUEUE;
     doneShowing = true;
     doneShownAt = ms;
+    face.happyUntil = ms + DONE_SHOW_MS + 6000;
   }
   xSemaphoreGive(lock);
 
@@ -731,27 +982,25 @@ void loop() {
   if (clockReady() && view.loaded) checkAlarms(now);
   if (ringing && ms - ringStartedAt > RING_MS) ringing = false;
   if (doneShowing && ms - doneShownAt > DONE_SHOW_MS) doneShowing = false;
+  // The setup screen shows itself when the board cannot get online.
+  const bool needsSetup = portalAPOpen() && (WiFi.status() != WL_CONNECTED || strcmp(view.status, "No account") == 0 || strcmp(view.status, "Login failed") == 0);
 
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
-  if (ringing) {
-    drawRinging();
-  } else if (doneShowing) {
-    drawDone();
-  } else if (!clockReady()) {
-    centered("VOX", 14, 3);
-    centered(view.status, 48, 1);
-  } else {
-    switch (page) {
-      case PAGE_HOME: drawHome(now); break;
-      case PAGE_ALARM: drawAlarm(now); break;
-      case PAGE_REMINDERS: drawReminders(now); break;
-      case PAGE_TASKS: drawTasks(now); break;
-      default: break;
-    }
+  if (ringing) drawRinging();
+  else if (doneShowing) drawDone();
+  else if (showingSetup || needsSetup) drawSetup();
+  else if (!clockReady()) { centered("VOX", 14, 3); centered(view.status, 48, 1); }
+  else switch (page) {
+    case SCR_FACE: drawFace(ms, now); break;
+    case SCR_CLOCK: drawClock(now); break;
+    case SCR_TODAY: drawDay("TODAY", midnightOf(now), now); break;
+    case SCR_TOMORROW: drawDay("TOMORROW", midnightOf(now, 1), now); break;
+    case SCR_UPCOMING: drawUpcoming(now); break;
+    case SCR_TASKS: drawTasks(now); break;
+    default: break;
   }
-  if (down && !holdFired) drawHoldBar(ms - downAt);
-  // Ringing alarms flash the whole screen twice a second.
+  if (down && !setupFired) drawHoldBar(heldFor);
   display.invertDisplay(ringing && (ms / 500) % 2);
   display.display();
   delay(30);

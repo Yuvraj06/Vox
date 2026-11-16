@@ -26,32 +26,54 @@ If the OLED stays black, its address may be 0x3D. Change `OLED_ADDRESS` in `src/
 
 ## Setup
 
-1. Copy `include/secrets.example.h` to `include/secrets.h`.
-2. Fill in your Wi-Fi name and password, and the Vox email and password (same as the app).
-3. Set `TIME_ZONE`. India is `IST-5:30`.
-4. Plug in the board and run `pio run -t upload` from this folder. Then `pio device monitor` to watch it connect.
+1. Plug in the board and run `pio run -t upload` from this folder.
+2. If the board has no Wi-Fi saved, or cannot connect within 10 seconds, the screen shows **SETUP**.
+3. On your phone, join the Wi-Fi called **Vox Desk** (no password). The setup page pops up by itself.
+   If it does not, open **http://192.168.4.1** in the browser.
+4. Pick your Wi-Fi (tap **Scan**), type its password, then your Vox email and password. Tap **Save**.
+5. The board connects. Once it is online, the same page is also at its address on your Wi-Fi
+   (shown at the bottom of the setup screen).
 
 Wi-Fi must be 2.4 GHz. The ESP32 cannot join 5 GHz networks.
+`include/secrets.h` is optional. If present, it only fills in the first-time defaults.
+
+## Admin page
+
+- Wi-Fi network and password (with a Scan button)
+- Vox account email and password
+- Brightness
+- Which screens a tap cycles through, and which one is the idle screen
+- How long until it goes back to the idle screen
+- Upside down mounting, 24 hour clock, time zone
+- Status: Wi-Fi and account connection
+
+Everything is saved in the board's own flash, so it survives unplugging.
 
 ## Using it
 
 | Touch | Does |
 |---|---|
-| Tap | Next screen: Home, Next alarm, Reminders, Tasks |
-| Hold 1 s on Tasks | Marks the top task done |
-| Hold 1 s elsewhere | Refreshes now |
+| Tap | Next screen |
+| Hold 1 s, let go | On Tasks: marks the top task done. Elsewhere: refreshes now |
+| Hold 7 s | Opens the setup page (hold 7 s again to close it) |
 | Tap while an alarm rings | Stops it |
+
+A bar along the bottom fills while you hold, with a "setup in 3" countdown after the first second.
 
 Screens:
 
-- **Home**: date, big clock, "Alarm in 07:42:10", tasks done today and still to do. Top right shows Live, or what is wrong (No Wi-Fi, Login failed, Offline).
-- **Next alarm**: countdown, name, day and time.
-- **Reminders**: the next four, with day and time.
-- **Tasks**: the four most important: soonest deadline first, then ones in progress. `!` means late, `>` means doing. The top one is highlighted; hold to complete it.
-- **Completed**: pops up for 4 seconds whenever a task becomes done, with a tick and the task name.
-- **Alarm**: flashes and shows the alarm name when its time comes. Tap to stop.
+- **Face** (idle by default): two soft eyes that blink and look around, with a small clock. Sleepy with
+  "zzz" from 11 pm to 6 am. Happy eyes and a big smile for a few seconds after a task is completed.
+  Shows a countdown at the bottom when something is less than an hour away.
+- **Clock**: date, big clock, "Alarm in 07:42:10", tasks done today and still to do.
+- **Today**: reminders, alarms and deadlines today in order. Things that already went off are struck through.
+- **Tomorrow**: the same for tomorrow.
+- **Upcoming**: big countdown to the very next thing, then the two after it.
+- **Tasks**: the most important four. `!` late, `>` doing. The top one is highlighted; hold 1 s to complete it.
+- **Completed**: pops up for 4 seconds whenever a task becomes done anywhere.
+- **Alarm**: flashes when an alarm's time comes. Tap to stop.
 
-It asks Supabase every 10 seconds. After 60 seconds without a touch it goes back to Home.
+It asks Supabase every 10 seconds.
 
 ## How it talks to Supabase
 
