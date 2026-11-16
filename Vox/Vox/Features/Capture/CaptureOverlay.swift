@@ -6,6 +6,7 @@ struct CaptureOverlay: View {
     @Environment(CaptureModel.self) private var capture
     @State private var typing = false
     @State private var draft = ""
+    @State private var showingThinking = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -41,6 +42,7 @@ struct CaptureOverlay: View {
         .animation(.smooth(duration: 0.35), value: capture.phase)
         .animation(.smooth(duration: 0.25), value: capture.cancelArmed)
         .task { await capture.prepare() }
+        .sheet(isPresented: $showingThinking) { ThinkingView() }
         .alert("Type a command", isPresented: $typing) {
             TextField("Add Dune to movies I watched", text: $draft)
             Button("Send") {
@@ -75,9 +77,11 @@ struct CaptureOverlay: View {
         case .queued:
             NoticeCard(
                 icon: "brain.fill",
-                tint: TaskStatus.doing.tint,
-                text: "This one needs more thought. Tap the brain at the top right to follow along."
-            )
+                tint: .voxAccent,
+                text: "This one needs more thought. Tap here to follow along in Thinking."
+            ) {
+                showingThinking = true
+            }
             .transition(.move(edge: .bottom).combined(with: .opacity))
         case .finished(let outcome):
             ResultCard(outcome: outcome)
@@ -155,7 +159,7 @@ private struct CaptionCard: View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 if thinking {
-                    ProgressView().controlSize(.mini).tint(Color.voxAmber)
+                    ProgressView().controlSize(.mini).tint(Color.voxAccent)
                 } else {
                     Circle().fill(statusColor).frame(width: 8, height: 8)
                 }
@@ -209,7 +213,7 @@ private struct CaptionCard: View {
     }
 
     private var statusColor: Color {
-        if thinking { return .voxAmber }
+        if thinking { return .voxAccent }
         return capture.cancelArmed ? .red : Self.listeningRed
     }
 }
@@ -222,7 +226,7 @@ private struct Waveform: View {
         HStack(spacing: 4) {
             ForEach(levels.indices, id: \.self) { index in
                 Capsule()
-                    .fill(Color.voxAmber.opacity(0.35 + 0.65 * Double(index) / Double(levels.count)))
+                    .fill(Color.voxAccent.opacity(0.35 + 0.65 * Double(index) / Double(levels.count)))
                     .frame(width: 4, height: 4 + min(levels[index] * 1.6, 1) * 30)
             }
         }
@@ -250,7 +254,7 @@ private struct PreviewCard: View {
                         .foregroundStyle(.white.opacity(0.5))
                 }
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Color.voxAmber)
+                .foregroundStyle(Color.voxAccent)
                 Text("\u{201C}\(plan.transcript)\u{201D}")
                     .font(.system(size: 17, weight: .medium))
                     .foregroundStyle(.white.opacity(0.9))
@@ -278,10 +282,10 @@ private struct PreviewCard: View {
                             Text("Next")
                             Image(systemName: "arrow.right")
                         }
-                        .foregroundStyle(Color(red: 0.12, green: 0.1, blue: 0.08))
+                        .foregroundStyle(Color.voxInk)
                         .frame(maxWidth: .infinity, minHeight: 46)
-                        .background(Color.voxAmber, in: .rect(cornerRadius: 16))
-                        .shadow(color: Color.voxAmber.opacity(0.4), radius: 8, y: 4)
+                        .background(Color.voxAccent, in: .rect(cornerRadius: 16))
+                        .shadow(color: Color.voxAccent.opacity(0.4), radius: 8, y: 4)
                     }
                 }
                 .font(.system(size: 15, weight: .semibold))
@@ -301,6 +305,8 @@ private struct NoticeCard: View {
     let icon: String
     let tint: Color
     let text: String
+    /// Runs on tap, before the card goes away.
+    var action: (() -> Void)?
     @Environment(CaptureModel.self) private var capture
 
     var body: some View {
@@ -314,7 +320,10 @@ private struct NoticeCard: View {
         }
         .voxCard(radius: 22, padding: 16)
         .padding(.horizontal, 16)
-        .onTapGesture { capture.dismiss() }
+        .onTapGesture {
+            action?()
+            capture.dismiss()
+        }
     }
 }
 
@@ -376,14 +385,14 @@ private struct ResultCard: View {
 
     private var tint: Color {
         switch outcome {
-        case .applied: TaskStatus.done.tint
-        case .unclear: TaskStatus.todo.tint
-        case .failed: TaskStatus.doing.tint
+        case .applied: .voxAccent
+        case .unclear: .white.opacity(0.7)
+        case .failed: .voxError
         }
     }
 }
 
-/// The round amber mic. Hold to talk, let go to send, slide up to cancel.
+/// The round glass mic with an ice blue glow. Hold to talk, let go to send, slide up to cancel.
 struct MicButton: View {
     @Environment(CaptureModel.self) private var capture
     /// True once the finger has stayed down long enough to record.
@@ -395,18 +404,16 @@ struct MicButton: View {
     private let cancelDistance: CGFloat = -80
     /// How long to hold before recording starts. Shorter taps are ignored.
     private let holdDelay: Duration = .milliseconds(250)
-    /// Dark brown, so the icon reads on amber.
-    private static let ink = Color(red: 0.12, green: 0.1, blue: 0.08)
 
     var body: some View {
         let listening = capture.phase == .listening
         let thinking = capture.phase == .thinking
 
         ZStack {
-            // Soft amber light around the button.
+            // Soft light around the button.
             Circle()
                 .fill(RadialGradient(
-                    colors: [fillTop.opacity(listening ? 0.7 : 0.5), .clear],
+                    colors: [glow.opacity(listening ? 0.55 : 0.32), .clear],
                     center: .center,
                     startRadius: 0,
                     endRadius: size * 0.85
@@ -414,19 +421,26 @@ struct MicButton: View {
                 .frame(width: size * 1.7, height: size * 1.7)
                 .allowsHitTesting(false)
             if listening || thinking {
-                PulseRings(level: CGFloat(capture.transcriber.level), color: capture.cancelArmed ? .red : .voxAmber, calm: thinking)
+                PulseRings(level: CGFloat(capture.transcriber.level), color: glow, calm: thinking)
                     .frame(width: size, height: size)
                     .transition(.scale(scale: 0.6).combined(with: .opacity))
             }
             Image(systemName: capture.cancelArmed ? "xmark" : "mic.fill")
                 .font(.system(size: 28, weight: .semibold))
-                .foregroundStyle(Self.ink)
+                .foregroundStyle(glow)
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: size, height: size)
-                .background(
-                    Circle().fill(LinearGradient(colors: [fillTop, fillBottom], startPoint: .top, endPoint: .bottom))
-                )
-                .shadow(color: fillBottom.opacity(0.5), radius: 12, y: 6)
+                .voxGlass(in: .circle)
+                // A lit rim, brightest at the top, so it reads as the one button that matters.
+                .overlay {
+                    Circle()
+                        .strokeBorder(
+                            LinearGradient(colors: [glow.opacity(0.95), glow.opacity(0.25)], startPoint: .top, endPoint: .bottom),
+                            lineWidth: 1.5
+                        )
+                        .allowsHitTesting(false)
+                }
+                .shadow(color: glow.opacity(listening ? 0.6 : 0.4), radius: 18, y: 4)
                 .scaleEffect(holding ? 1.28 : 1)
                 .opacity(thinking ? 0.6 : 1)
         }
@@ -461,12 +475,9 @@ struct MicButton: View {
         .accessibilityLabel("Hold to talk")
     }
 
-    private var fillTop: Color {
-        capture.cancelArmed ? Color(red: 1, green: 0.5, blue: 0.48) : Color(red: 1, green: 0.78, blue: 0.42)
-    }
-
-    private var fillBottom: Color {
-        capture.cancelArmed ? Color(red: 0.86, green: 0.25, blue: 0.24) : Color(red: 0.93, green: 0.58, blue: 0.2)
+    /// Ice blue, or red while letting go would cancel.
+    private var glow: Color {
+        capture.cancelArmed ? .voxError : .voxAccent
     }
 }
 

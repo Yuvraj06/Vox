@@ -72,19 +72,19 @@ private struct SignInCard: View {
             if let error = auth.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.footnote)
-                    .foregroundStyle(TaskStatus.doing.tint)
+                    .foregroundStyle(Color.voxError)
             }
             if let sentTo = auth.confirmationSentTo {
                 Label("Check your email. We sent a link to \(sentTo). Tap it on this phone and Vox signs you in.", systemImage: "envelope.fill")
                     .font(.footnote)
-                    .foregroundStyle(TaskStatus.done.tint)
+                    .foregroundStyle(Color.voxAccent)
             }
             if auth.errorMessage == AuthModel.notConfirmedMessage || auth.confirmationSentTo != nil {
                 Button("Send the link again") {
                     Task { await auth.resendConfirmation(email: email) }
                 }
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(Color.voxAmber)
+                .foregroundStyle(Color.voxAccent)
                 .disabled(auth.busy || !email.contains("@"))
             }
 
@@ -94,9 +94,9 @@ private struct SignInCard: View {
                     Text(creating ? "Create account" : "Sign in")
                 }
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(Color(red: 0.12, green: 0.1, blue: 0.08))
+                .foregroundStyle(Color.voxInk)
                 .frame(maxWidth: .infinity, minHeight: 48)
-                .background(Color.voxAmber.opacity(canSubmit ? 1 : 0.4), in: .rect(cornerRadius: 16))
+                .background(Color.voxAccent.opacity(canSubmit ? 1 : 0.4), in: .rect(cornerRadius: 16))
             }
             .buttonStyle(.plain)
             .disabled(!canSubmit)
@@ -132,7 +132,7 @@ private struct SignedInCard: View {
             HStack(spacing: 12) {
                 Image(systemName: "person.crop.circle.fill")
                     .font(.system(size: 40))
-                    .foregroundStyle(Color.voxAmber)
+                    .foregroundStyle(Color.voxAccent)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Signed in").font(.caption.weight(.semibold)).foregroundStyle(.white.opacity(0.55))
                     Text(email).font(.headline).lineLimit(1)
@@ -145,7 +145,7 @@ private struct SignedInCard: View {
             if let error = auth.errorMessage {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
                     .font(.footnote)
-                    .foregroundStyle(TaskStatus.doing.tint)
+                    .foregroundStyle(Color.voxError)
             }
             Button {
                 Task { await auth.signOut() }
@@ -187,7 +187,7 @@ private struct SyncStatusRow: View {
             Spacer(minLength: 8)
             Button("Sync now") { Task { await sync.syncNow() } }
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.voxAmber)
+                .foregroundStyle(Color.voxAccent)
                 .disabled(sync.status == .syncing)
         }
         .padding(12)
@@ -222,9 +222,9 @@ private struct SyncStatusRow: View {
 
     private var tint: Color {
         switch sync.status {
-        case .failed: TaskStatus.doing.tint
+        case .failed: .voxError
         case .offline: .secondary
-        default: TaskStatus.done.tint
+        default: .voxAccent
         }
     }
 }

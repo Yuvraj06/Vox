@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Root navigation: the notes tree, starting at the top level.
-/// The brain button at the top right opens Thinking. The mic floats over everything.
+/// The gear at the top right opens Settings, with Thinking, History and Account. The mic floats over everything.
 struct ContentView: View {
     @Environment(NotesModel.self) private var model
     @Environment(CaptureModel.self) private var capture
@@ -15,12 +15,13 @@ struct ContentView: View {
             HomeView()
                 .navigationDestination(for: Route.self) { route in
                     switch route {
-                    case .node(let node) where node.kind == .note: NoteEditorView(nodeID: node.id).thinkingButton()
-                    case .node(let node): NodeListView(parentID: node.id).thinkingButton()
-                    case .allNotes: NodeListView(parentID: nil).thinkingButton()
-                    case .allReminders: AllRemindersView().thinkingButton()
-                    case .history: HistoryView().thinkingButton()
+                    case .node(let node) where node.kind == .note: NoteEditorView(nodeID: node.id)
+                    case .node(let node): NodeListView(parentID: node.id)
+                    case .allNotes: NodeListView(parentID: nil)
+                    case .allReminders: AllRemindersView()
+                    case .history: HistoryView()
                     case .account: AccountView()
+                    case .settings: SettingsView()
                     }
                 }
         }
@@ -54,6 +55,8 @@ struct ContentView: View {
         // Debug only: `-open "Orbit/Frontend"` jumps straight to a screen by titles, handy for screenshots.
         .onAppear {
             let args = ProcessInfo.processInfo.arguments
+            // `-openSettings` jumps straight to Settings.
+            if args.contains("-openSettings") { path.append(.settings) }
             guard let flag = args.firstIndex(of: "-open"), args.indices.contains(flag + 1) else { return }
             // `-openSlowly` pushes one screen per second, to watch the transitions.
             let slow = args.contains("-openSlowly")

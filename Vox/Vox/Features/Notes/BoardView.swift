@@ -209,7 +209,7 @@ private struct TaskCard: View {
                     }
                     if let due = card.dueAt {
                         Label(due.formatted(.dateTime.day().month()), systemImage: "calendar")
-                            .foregroundStyle(Color.voxAmber)
+                            .foregroundStyle(Color.voxAccent)
                             .fontWeight(.medium)
                     }
                     if !card.details.isEmpty {

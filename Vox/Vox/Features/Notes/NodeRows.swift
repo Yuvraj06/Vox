@@ -79,7 +79,7 @@ struct StarRating: View {
         HStack(spacing: 2) {
             ForEach(0..<5, id: \.self) { index in
                 Image(systemName: "star.fill")
-                    .foregroundStyle(index < value ? Color.voxAmber : .white.opacity(0.22))
+                    .foregroundStyle(index < value ? Color.voxAccent : .white.opacity(0.22))
             }
         }
         .font(.system(size: 10))

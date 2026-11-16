@@ -84,7 +84,7 @@ private struct HistoryRow: View {
                 HStack(spacing: 8) {
                     Text(entry.summary)
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(entry.undone ? Color.secondary : Color.voxAmber)
+                        .foregroundStyle(entry.undone ? Color.secondary : Color.voxAccent)
                         .strikethrough(entry.undone)
                         .lineLimit(1)
                     Text(entry.createdAt, format: .dateTime.hour().minute())

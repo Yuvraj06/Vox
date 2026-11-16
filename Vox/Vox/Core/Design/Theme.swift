@@ -12,39 +12,56 @@ extension TaskStatus {
 }
 
 extension Color {
-    /// The one accent: alarms, the countdown label, progress.
-    static let voxAmber = Color(red: 0.95, green: 0.69, blue: 0.29)   // #F2B04A
-    /// Icon tints on the home screen's notes card.
+    /// The one accent: the mic, the countdown, buttons that move you forward. A glowing ice blue.
+    static let voxAccent = Color(red: 0.55, green: 0.85, blue: 1.0)   // #8CD9FF
+    /// Dark text on the accent.
+    static let voxInk = Color(red: 0.04, green: 0.09, blue: 0.14)
+    /// Errors. Soft, so it reads on dark glass without shouting.
+    static let voxError = Color(red: 1.0, green: 0.55, blue: 0.52)
+    /// Folders with no color picked yet.
     static let voxFolder = Color(red: 0.56, green: 0.66, blue: 0.85)  // #8FA8D8
-    static let voxList = Color(red: 0.91, green: 0.63, blue: 0.42)    // #E8A06A
-    static let voxBoard = Color(red: 0.49, green: 0.77, blue: 0.60)   // #7CC59A
 }
 
-/// Clear glass: you see the scenery through it. A soft sheen at the top left,
-/// and an edge that is bright where the light hits and faint on the far side.
+/// How the glass looks. Set with the sliders in Settings.
+enum GlassLook {
+    static let darknessKey = "glassDarkness"
+    static let frostKey = "glassFrost"
+    static let defaultDarkness = 0.6
+    static let defaultFrost = 0.3
+}
+
+/// Smoky glass: you see the scenery through it, darkened so text stays readable.
+/// Frost blurs the scenery more. A faint sheen at the top left, and an edge that is
+/// bright where the light hits and faint on the far side.
 private struct VoxGlass<S: InsettableShape>: ViewModifier {
     let shape: S
     var interactive = false
+
+    @AppStorage(GlassLook.darknessKey) private var darkness = GlassLook.defaultDarkness
+    @AppStorage(GlassLook.frostKey) private var frost = GlassLook.defaultFrost
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
         content
             // Sits on the glass, under the content.
             .background {
-                shape.fill(LinearGradient(
-                    stops: [
-                        .init(color: .white.opacity(0.14), location: 0),
-                        .init(color: .white.opacity(0.03), location: 0.45),
-                        .init(color: .clear, location: 1),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ))
+                ZStack {
+                    if frost > 0.01 {
+                        shape.fill(.ultraThinMaterial).opacity(frost)
+                    }
+                    shape.fill(Color.black.opacity(reduceTransparency ? 0.8 : darkness * 0.6))
+                    shape.fill(LinearGradient(
+                        colors: [.white.opacity(0.06), .clear],
+                        startPoint: .topLeading,
+                        endPoint: .center
+                    ))
+                }
             }
             .glassEffect(interactive ? .clear.interactive() : .clear, in: shape)
             .overlay {
                 shape.strokeBorder(
                     LinearGradient(
-                        colors: [.white.opacity(0.5), .white.opacity(0.1), .white.opacity(0.25)],
+                        colors: [.white.opacity(0.32), .white.opacity(0.06), .white.opacity(0.14)],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),

@@ -74,9 +74,8 @@ private struct Separator: View {
 extension PlanStep.Verb {
     var tint: Color {
         switch self {
-        case .add: TaskStatus.done.tint
-        case .create: TaskStatus.doing.tint
-        case .change, .move, .rename: TaskStatus.todo.tint
+        case .add, .create: .voxAccent
+        case .change, .move, .rename: .white.opacity(0.7)
         case .delete: .red
         }
     }

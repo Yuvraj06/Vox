@@ -124,7 +124,7 @@ final class SystemReminderScheduler: NSObject, ReminderScheduling, UNUserNotific
         )
         let attributes = AlarmAttributes<AlarmInfo>(
             presentation: AlarmPresentation(alert: alert),
-            tintColor: TaskStatus.doing.tint
+            tintColor: .voxAccent
         )
         _ = try await manager.schedule(
             id: reminder.id,

@@ -44,7 +44,7 @@ struct ReminderRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: reminder.kind.icon)
-                .foregroundStyle(reminder.kind == .alarm ? TaskStatus.doing.tint : TaskStatus.todo.tint)
+                .foregroundStyle(reminder.kind == .alarm ? Color.voxAccent : Color.white.opacity(0.6))
                 .frame(width: 24)
             VStack(alignment: .leading, spacing: 2) {
                 Text(reminder.repeatRule == nil
@@ -177,7 +177,7 @@ struct MonthCalendar: View {
                     .font(.subheadline.weight(isToday ? .bold : .regular))
                     .foregroundStyle(isPast ? .secondary : .primary)
                 Circle()
-                    .fill(Color.voxAmber)
+                    .fill(Color.voxAccent)
                     .frame(width: 5, height: 5)
                     .opacity(busyDays.contains(calendar.startOfDay(for: day)) ? 1 : 0)
             }
@@ -186,7 +186,7 @@ struct MonthCalendar: View {
                 if isSelected {
                     Circle().fill(.white.opacity(0.18))
                 } else if isToday {
-                    Circle().stroke(Color.voxAmber, lineWidth: 1.5)
+                    Circle().stroke(Color.voxAccent, lineWidth: 1.5)
                 }
             }
             .contentShape(.rect)
@@ -234,8 +234,8 @@ extension RemindersModel.Entry {
 
     var tint: Color {
         switch source {
-        case .reminder(let reminder): reminder.kind == .alarm ? .voxAmber : .white
-        case .deadline: .white.opacity(0.7)
+        case .reminder(let reminder): reminder.kind == .alarm ? .voxAccent : .white.opacity(0.55)
+        case .deadline: .white.opacity(0.55)
         }
     }
 

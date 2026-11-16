@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Thinking: commands getting a careful second look, with every step shown live.
-/// Opens as a sheet from the brain button. Settings (Gemini key) are behind the gear.
+/// Opens as a sheet from Settings. Settings (Gemini key) are behind the gear.
 struct ThinkingView: View {
     @Environment(ThinkingQueue.self) private var queue
     @Environment(\.dismiss) private var dismiss
@@ -50,35 +50,7 @@ struct ThinkingView: View {
     }
 }
 
-extension View {
-    /// Adds the brain button at the top right, which opens Thinking.
-    func thinkingButton() -> some View {
-        modifier(ThinkingButton())
-    }
-}
-
-/// Pulses while something is being checked. The amber count is how many wait for a choice.
-private struct ThinkingButton: ViewModifier {
-    @Environment(ThinkingQueue.self) private var queue
-    @State private var showing = false
-
-    func body(content: Content) -> some View {
-        content
-            .toolbar {
-                ToolbarSpacer(.fixed, placement: .topBarTrailing)
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showing = true } label: { ThinkingIcon() }
-                        .accessibilityLabel("Thinking")
-                        .accessibilityValue(queue.waitingCount > 0 ? "\(queue.waitingCount) waiting" : "")
-                }
-            }
-            .sheet(isPresented: $showing) {
-                ThinkingView()
-            }
-    }
-}
-
-/// The brain. Pulses while something is being checked, with an amber count of how many wait for a choice.
+/// The brain. Pulses while something is being checked, with a count of how many wait for a choice.
 struct ThinkingIcon: View {
     @Environment(ThinkingQueue.self) private var queue
 
@@ -91,7 +63,7 @@ struct ThinkingIcon: View {
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.black)
                         .frame(minWidth: 15, minHeight: 15)
-                        .background(TaskStatus.doing.tint, in: .circle)
+                        .background(Color.voxAccent, in: .circle)
                         .offset(x: 9, y: -8)
                 }
             }
@@ -114,7 +86,7 @@ private struct JobCard: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
+        .voxGlass(in: .rect(cornerRadius: 24))
         .animation(.smooth(duration: 0.25), value: job.state)
         .animation(.smooth(duration: 0.25), value: job.log)
         .contextMenu {
@@ -141,19 +113,19 @@ private struct JobCard: View {
         case .working:
             ProgressView().controlSize(.small)
         case .agrees:
-            Badge(text: "Looks right", icon: "checkmark", tint: TaskStatus.done.tint)
+            Badge(text: "Looks right", icon: "checkmark", tint: .voxAccent)
         case .suggests:
-            Badge(text: "Better idea", icon: "lightbulb.fill", tint: TaskStatus.doing.tint)
+            Badge(text: "Better idea", icon: "lightbulb.fill", tint: .voxAccent)
         case .ready:
-            Badge(text: "Ready", icon: "sparkles", tint: TaskStatus.doing.tint)
+            Badge(text: "Ready", icon: "sparkles", tint: .voxAccent)
         case .applied:
-            Badge(text: "Done", icon: "checkmark", tint: TaskStatus.done.tint)
+            Badge(text: "Done", icon: "checkmark", tint: .white.opacity(0.7))
         case .kept:
-            Badge(text: "Kept", icon: "hand.thumbsup", tint: TaskStatus.todo.tint)
+            Badge(text: "Kept", icon: "hand.thumbsup", tint: .white.opacity(0.7))
         case .unclear:
-            Badge(text: "Unsure", icon: "questionmark", tint: TaskStatus.todo.tint)
+            Badge(text: "Unsure", icon: "questionmark", tint: .white.opacity(0.7))
         case .failed:
-            Badge(text: "Stuck", icon: "exclamationmark.triangle", tint: .red)
+            Badge(text: "Stuck", icon: "exclamationmark.triangle", tint: .voxError)
         }
     }
 
@@ -165,7 +137,7 @@ private struct JobCard: View {
                 HStack(spacing: 8) {
                     Image(systemName: "circle.fill")
                         .font(.system(size: 6))
-                        .foregroundStyle(isLast && job.state == .working ? TaskStatus.doing.tint : Color.secondary.opacity(0.5))
+                        .foregroundStyle(isLast && job.state == .working ? Color.voxAccent : Color.secondary.opacity(0.5))
                         .symbolEffect(.pulse, isActive: isLast && job.state == .working)
                     Text(line)
                         .font(.caption)
@@ -188,7 +160,8 @@ private struct JobCard: View {
                 Button("Use this") { queue.accept(job) }
                     .fontWeight(.semibold)
                     .buttonStyle(.glassProminent)
-                    .tint(TaskStatus.done.tint.opacity(0.8))
+                    .tint(.voxAccent)
+                    .foregroundStyle(Color.voxInk)
             }
         case .ready(let steps):
             section("Plan", steps: steps, dimmed: false)
@@ -199,7 +172,8 @@ private struct JobCard: View {
                 Button("Apply") { queue.accept(job) }
                     .fontWeight(.semibold)
                     .buttonStyle(.glassProminent)
-                    .tint(TaskStatus.done.tint.opacity(0.8))
+                    .tint(.voxAccent)
+                    .foregroundStyle(Color.voxInk)
             }
         case .applied(let lines):
             VStack(alignment: .leading, spacing: 4) {
