@@ -333,6 +333,7 @@ final class Brain: CommandRunner {
         } catch {
             job.state = .failed(error.localizedDescription)
         }
+        thinking.reportIfStuck(job)
     }
 
     /// Sets the job's verdict: agrees, a better idea, or a plan ready to apply.
@@ -373,6 +374,7 @@ final class Brain: CommandRunner {
         } catch {
             let message = error.localizedDescription
             job.state = .failed(replacing ? "Undid the first try, but the fix failed: \(message)" : message)
+            thinking.reportIfStuck(job)
         }
         onChange()
     }

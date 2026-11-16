@@ -22,6 +22,20 @@ final class ThinkingQueue {
         }.count
     }
 
+    /// A command that ended failed or unclear with nothing applied. The capture screen asks for more words,
+    /// so no command is lost. Gets the command, the question or problem, and true for a question.
+    var onNeedsAnswer: (_ command: String, _ prompt: String, _ isQuestion: Bool) -> Void = { _, _, _ in }
+
+    /// Hands a stuck job to `onNeedsAnswer`. Jobs whose first try was applied are not stuck: that stays.
+    func reportIfStuck(_ job: ThinkingJob) {
+        guard job.appliedLogID == nil else { return }
+        switch job.state {
+        case .failed(let message): onNeedsAnswer(job.transcript, message, false)
+        case .unclear(let question): onNeedsAnswer(job.transcript, question, true)
+        default: break
+        }
+    }
+
     func add(_ job: ThinkingJob) {
         jobs.insert(job, at: 0)
     }

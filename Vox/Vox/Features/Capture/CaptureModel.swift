@@ -4,6 +4,7 @@ import Observation
 /// Push to talk: hold to record, release to send, slide up to cancel.
 /// The Brain's plan shows as a preview first. Next applies it, Cancel throws it away.
 /// Typed commands go through the same path.
+/// A command that fails or is unclear is never dropped: it waits on screen for a spoken (or typed) answer.
 @Observable
 final class CaptureModel {
     enum Phase: Equatable {
@@ -15,6 +16,23 @@ final class CaptureModel {
         /// Too hard for the fast path. Being worked on in the Thinking tab.
         case queued
         case finished(CommandOutcome)
+        /// Failed or unclear. Waits, with no time limit, for an answer that is sent together with the command.
+        case clarify(Clarification)
+    }
+
+    /// A command waiting for more words.
+    struct Clarification: Equatable {
+        /// Everything said so far for this command.
+        let command: String
+        /// The Brain's question, or what went wrong.
+        let prompt: String
+        /// True for a question from the Brain. False for an error.
+        let isQuestion: Bool
+
+        /// The command plus the answer, as one command for the Brain. A question is kept so the answer makes sense.
+        func combined(with answer: String) -> String {
+            isQuestion ? "\(command). \(prompt) \(answer)" : "\(command). \(answer)"
+        }
     }
 
     private(set) var phase: Phase = .idle
@@ -28,6 +46,8 @@ final class CaptureModel {
     private(set) var liveSteps: [PlanStep] = []
     /// True when the last applied command is getting a second look in the Thinking tab.
     private(set) var doubleChecking = false
+    /// The command waiting for an answer, kept while the answer is being said.
+    private(set) var clarifying: Clarification?
     /// The open folder, list or note. Commands only see it and what is inside it. Nil on the home screen.
     var scope: Node?
 
@@ -43,7 +63,7 @@ final class CaptureModel {
     /// True while the screen behind should blur.
     var isFocused: Bool {
         switch phase {
-        case .listening, .thinking, .preview: true
+        case .listening, .thinking, .preview, .clarify: true
         default: false
         }
     }
@@ -76,7 +96,7 @@ final class CaptureModel {
             } catch {
                 micError = error.localizedDescription
                 await transcriber.cancel()
-                phase = .idle
+                phase = resting
             }
         }
     }
@@ -90,12 +110,12 @@ final class CaptureModel {
             await startTask?.value
             if cancel {
                 await transcriber.cancel()
-                phase = .idle
+                phase = resting
                 return
             }
             let text = await transcriber.stop()
             guard !text.isEmpty else {
-                phase = .idle
+                phase = resting
                 return
             }
             await send(text)
@@ -109,16 +129,19 @@ final class CaptureModel {
         guard !text.isEmpty, phase != .thinking else { return }
         dismissTask?.cancel()
         if case .preview(let plan) = phase { runner.discard(plan) }
-        sentText = text
+        // An answer to a question goes out together with the command it answers.
+        let command = clarifying?.combined(with: text) ?? text
+        clarifying = nil
+        sentText = command
         liveSteps = []
         phase = .thinking
-        let outcome = await runner.plan(text, scope: scope?.id) { [weak self] steps in
+        let outcome = await runner.plan(command, scope: scope?.id) { [weak self] steps in
             self?.liveSteps = steps
         }
         switch outcome {
         case .ready(let plan): phase = .preview(plan)
-        case .unclear(let question): finish(.unclear(question: question))
-        case .failed(let message): finish(.failed(message: message))
+        case .unclear(let question): showClarify(Clarification(command: command, prompt: question, isQuestion: true))
+        case .failed(let message): showClarify(Clarification(command: command, prompt: message, isQuestion: false))
         case .queued:
             phase = .queued
             dismissLater(after: 4)
@@ -129,7 +152,51 @@ final class CaptureModel {
     func confirm() {
         guard case .preview(let plan) = phase else { return }
         doubleChecking = plan.needsCheck
-        finish(runner.apply(plan))
+        switch runner.apply(plan) {
+        case .unclear(let question): showClarify(Clarification(command: plan.transcript, prompt: question, isQuestion: true))
+        case .failed(let message): showClarify(Clarification(command: plan.transcript, prompt: message, isQuestion: false))
+        case let outcome: finish(outcome)
+        }
+    }
+
+    /// Shows a command that needs more words, and waits for them.
+    /// A background command from Thinking waits until the screen is free, so it never covers one in progress.
+    func askAgain(_ clarification: Clarification) {
+        switch phase {
+        case .listening, .thinking, .preview, .clarify:
+            waiting.append(clarification)
+        default:
+            showClarify(clarification)
+        }
+    }
+
+    /// Shows the answer card right away. For the command on screen right now.
+    private func showClarify(_ clarification: Clarification) {
+        dismissTask?.cancel()
+        doubleChecking = false
+        clarifying = clarification
+        phase = .clarify(clarification)
+        Haptics.warning()
+    }
+
+    /// Background commands that needed an answer while the screen was busy.
+    private var waiting: [Clarification] = []
+
+    /// Cancel on the answer card: drops the command.
+    func cancelClarify() {
+        clarifying = nil
+        phase = .idle
+        showWaiting()
+    }
+
+    /// Where the screen goes back to after a cancelled recording: the open question, or nothing.
+    private var resting: Phase {
+        clarifying.map { .clarify($0) } ?? .idle
+    }
+
+    private func showWaiting() {
+        guard phase == .idle, !waiting.isEmpty else { return }
+        askAgain(waiting.removeFirst())
     }
 
     /// Cancel: throws the previewed plan away. Nothing changes.
@@ -137,6 +204,7 @@ final class CaptureModel {
         guard case .preview(let plan) = phase else { return }
         runner.discard(plan)
         phase = .idle
+        showWaiting()
     }
 
     private func finish(_ outcome: CommandOutcome) {
@@ -171,5 +239,6 @@ final class CaptureModel {
         case .finished, .queued: phase = .idle
         default: break
         }
+        showWaiting()
     }
 }

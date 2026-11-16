@@ -43,7 +43,12 @@ import SwiftUI
         )
         brain.prewarm()
         _notes = State(initialValue: notes)
-        _capture = State(initialValue: CaptureModel(runner: brain))
+        let capture = CaptureModel(runner: brain)
+        // A background command that failed or was unclear comes back on screen for an answer.
+        brain.thinking.onNeedsAnswer = { command, prompt, isQuestion in
+            capture.askAgain(.init(command: command, prompt: prompt, isQuestion: isQuestion))
+        }
+        _capture = State(initialValue: capture)
         _thinking = State(initialValue: brain.thinking)
         _gemini = State(initialValue: gemini)
         _reminders = State(initialValue: reminders)

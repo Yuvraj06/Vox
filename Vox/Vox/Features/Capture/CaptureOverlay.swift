@@ -86,6 +86,9 @@ struct CaptureOverlay: View {
         case .finished(let outcome):
             ResultCard(outcome: outcome)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+        case .clarify(let clarification):
+            ClarifyCard(clarification: clarification)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
         case .idle:
             if let error = capture.micError {
                 ResultCard(outcome: .failed(message: error))
@@ -116,6 +119,7 @@ struct CaptureOverlay: View {
     private var hint: some View {
         let text: String? = switch capture.phase {
         case .idle: "Hold to talk"
+        case .clarify: "Hold to answer"
         case .listening: capture.cancelArmed ? "Let go to cancel" : "Slide up to cancel"
         default: nil
         }
@@ -175,6 +179,12 @@ private struct CaptionCard: View {
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
                     .foregroundStyle(.white.opacity(0.55))
                 }
+            }
+            if !thinking, let clarifying = capture.clarifying {
+                Text(clarifying.prompt)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(2)
             }
             words
                 .font(.system(size: 24, weight: .semibold))
@@ -389,6 +399,48 @@ private struct ResultCard: View {
         case .unclear: .white.opacity(0.7)
         case .failed: .voxError
         }
+    }
+}
+
+/// A command that failed or was unclear, waiting for more words. Stays until answered or cancelled.
+private struct ClarifyCard: View {
+    let clarification: CaptureModel.Clarification
+    @Environment(CaptureModel.self) private var capture
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: clarification.isQuestion ? "questionmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .font(.title3)
+                    .foregroundStyle(clarification.isQuestion ? Color.voxAccent : Color.voxError)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(clarification.prompt).font(.subheadline.weight(.semibold))
+                    Text("You said: \u{201C}\(clarification.command)\u{201D}")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.6))
+                        .lineLimit(3)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack {
+                Label(clarification.isQuestion ? "Hold the mic to answer" : "Hold the mic to add or fix it", systemImage: "mic.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white.opacity(0.7))
+                Spacer()
+                Button {
+                    capture.cancelClarify()
+                } label: {
+                    Text("Cancel")
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(.white.opacity(0.14), in: .capsule)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .voxCard(radius: 22, padding: 16)
+        .padding(.horizontal, 16)
     }
 }
 
