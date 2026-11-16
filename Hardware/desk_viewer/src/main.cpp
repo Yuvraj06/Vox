@@ -227,7 +227,9 @@ int request(const char* method, const String& path, const String& body, String& 
   if (accessToken.length()) http.addHeader("Authorization", "Bearer " + accessToken);
   if (strcmp(method, "PATCH") == 0) http.addHeader("Prefer", "return=minimal");
   const int code = http.sendRequest(method, body);
-  reply = code > 0 ? http.getString() : "";
+  // 204 (a saved PATCH) has no body and no length. Reading it would wait until the server
+  // drops the kept-alive connection, which freezes every update after a save.
+  reply = code > 0 && code != 204 ? http.getString() : "";
   http.end();
   if (code == 401) accessToken = "";
   return code;
