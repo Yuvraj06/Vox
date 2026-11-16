@@ -28,6 +28,8 @@ final class RemindersModel {
     /// Bumped after every write. Reads touch it so views redraw.
     private var revision = 0
     var errorMessage: String?
+    /// Called after this model changed nodes itself (made, reopened or removed a reminder's todo), so the notes screens redraw.
+    var onNodesChanged: () -> Void = {}
 
     init(store: any ReminderStore, nodes: any NodeStore, scheduler: any ReminderScheduling) {
         self.store = store
@@ -115,11 +117,49 @@ final class RemindersModel {
         return try? nodes.node(id: id)
     }
 
+    /// The todo an entry ticks off: the reminder's item, or the item with the deadline.
+    func todo(for entry: Entry) -> Node? {
+        switch entry.source {
+        case .deadline(let node): return node
+        case .reminder(let reminder): return reminder.nodeID.flatMap(node(id:))
+        }
+    }
+
+    /// The item a reminder is about, to open on tap. Nil for a reminder's own todo in the Reminders list,
+    /// which opens the reminder editor instead.
+    func linkedItem(of reminder: Reminder) -> Node? {
+        guard let node = reminder.nodeID.flatMap(node(id:)), !nodes.isInRemindersList(node) else { return nil }
+        return node
+    }
+
+    /// Todos with no time still to come. Ones whose reminder is still ahead already show in the dated list.
+    func untimed(_ todos: [Node], now: Date = .now) -> [Node] {
+        _ = revision
+        let timed = Set(pending().filter { $0.nextFire(after: now) != nil }.compactMap(\.nodeID))
+        return todos.filter { !timed.contains($0.id) }
+    }
+
     // MARK: Writes
 
     /// Saves and schedules. Asks for permission the first time.
+    /// A reminder about nothing in particular gets a todo in the Reminders list, so it can be ticked off.
     func save(_ reminder: Reminder) {
-        perform { try store.save(reminder) }
+        var reminder = reminder
+        var nodesChanged = false
+        perform {
+            if reminder.nodeID == nil, !reminder.done {
+                reminder.nodeID = try nodes.makeTodo(for: reminder).id
+                nodesChanged = true
+            } else if let id = reminder.nodeID, var todo = try nodes.node(id: id),
+                      nodes.isInRemindersList(todo), todo.title != reminder.title {
+                // Its own todo follows the reminder's title.
+                todo.title = reminder.title
+                try nodes.update(todo)
+                nodesChanged = true
+            }
+            try store.save(reminder)
+        }
+        if nodesChanged { onNodesChanged() }
         Task {
             do {
                 try await scheduler.schedule(reminder)
@@ -129,8 +169,17 @@ final class RemindersModel {
         }
     }
 
+    /// Deletes it, and its todo in the Reminders list if it has one. Items elsewhere stay.
     func delete(_ reminder: Reminder) {
-        perform { try store.delete(id: reminder.id) }
+        var nodesChanged = false
+        perform {
+            try store.delete(id: reminder.id)
+            if let id = reminder.nodeID, let todo = try nodes.node(id: id), nodes.isInRemindersList(todo) {
+                try nodes.delete(id: id)
+                nodesChanged = true
+            }
+        }
+        if nodesChanged { onNodesChanged() }
         Task { await scheduler.cancel(id: reminder.id) }
     }
 
@@ -157,13 +206,28 @@ final class RemindersModel {
         }
     }
 
-    /// Call after nodes change. Cancels reminders whose item is done or deleted,
-    /// and marks one-time reminders that already went off as done.
+    /// Call after nodes change. Gives every reminder a todo, cancels reminders whose item is done or deleted,
+    /// and marks one-time reminders that already went off as done (their todo stays until ticked).
+    /// A repeating reminder's own todo, ticked, only counts for that time: it opens again when the reminder next goes off.
     func reconcile(now: Date = .now) {
+        var nodesChanged = false
         for var reminder in ((try? store.all()) ?? []) where !reminder.done {
+            if reminder.nodeID == nil, let todo = try? nodes.makeTodo(for: reminder) {
+                reminder.nodeID = todo.id
+                try? store.save(reminder)
+                nodesChanged = true
+            }
             var itemGone = false
             if let nodeID = reminder.nodeID {
                 let node = (try? nodes.node(id: nodeID)) ?? nil
+                if var node, node.status == .done, reminder.repeatRule != nil, nodes.isInRemindersList(node) {
+                    if node.updatedAt < now, !reminder.occurrences(in: DateInterval(start: node.updatedAt, end: now)).isEmpty {
+                        node.status = .todo
+                        try? nodes.update(node)
+                        nodesChanged = true
+                    }
+                    continue
+                }
                 itemGone = node == nil || node?.status == .done
             }
             let wentOff = reminder.repeatRule == nil && reminder.fireAt <= now
@@ -176,6 +240,7 @@ final class RemindersModel {
             }
         }
         revision += 1
+        if nodesChanged { onNodesChanged() }
         rescheduleNudges(now: now)
     }
 

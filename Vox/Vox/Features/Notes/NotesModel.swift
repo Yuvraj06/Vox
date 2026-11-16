@@ -24,6 +24,11 @@ final class NotesModel {
         onChange()
     }
 
+    /// Redraws only. For changes the reminders made themselves, so they don't run again.
+    func redraw() {
+        revision += 1
+    }
+
     // MARK: Reads
 
     func node(id: UUID) -> Node? {

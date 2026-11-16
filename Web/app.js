@@ -174,7 +174,15 @@ function isDescendant(id, ancestorID) {
 }
 const ancestors = (n) => { const out = []; for (let p = node(n?.parent_id); p; p = node(p.parent_id)) out.unshift(p); return out; };
 const remindersList = () => children(null).find((n) => n.kind === "item" && n.title.trim().toLowerCase() === "reminders");
-const reminderTodos = () => { const list = remindersList(); return list ? children(list.id).filter((n) => n.status && n.status !== "done") : []; };
+const inRemindersList = (n) => !!n && n.parent_id != null && n.parent_id === remindersList()?.id;
+// Open todos in the Reminders list with no time still to come. Ones whose reminder is ahead show in the dated list.
+const reminderTodos = () => {
+  const list = remindersList();
+  if (!list) return [];
+  const now = new Date();
+  const timed = new Set(S.reminders.filter((r) => !r.done && r.node_id && nextFire(r, now)).map((r) => r.node_id));
+  return children(list.id).filter((n) => n.status && n.status !== "done" && !timed.has(n.id));
+};
 const rating = (n) => { const d = (n.details || []).find((x) => x.key.toLowerCase() === "rating"); const v = d && parseInt(d.value, 10); return Number.isInteger(v) && v >= 0 && v <= 5 ? v : null; };
 const iconFor = (n) => (n.kind === "note" ? "note" : n.view || "list");
 const tintOf = (n) => n.color || PRESETS[0][1];
@@ -306,8 +314,33 @@ function moveToFittingColumn(id) {
   const target = fittingColumn(columnItems(board), card.status);
   if (target && target.id !== col.id) patchNode(id, { parent_id: target.id, position: endPosition(target.id, id) });
 }
+// A repeating reminder's own todo in the Reminders list, ticked, counts for this time only. It keeps repeating.
 function cancelRemindersFor(nodeID) {
-  for (const r of S.reminders) if (r.node_id === nodeID && !r.done) patchReminder(r.id, { done: true });
+  const own = inRemindersList(node(nodeID));
+  for (const r of S.reminders) if (r.node_id === nodeID && !r.done && !(own && r.repeat_rule)) patchReminder(r.id, { done: true });
+}
+function ensureRemindersList() {
+  return remindersList() || insertNode({ kind: "item", title: "Reminders", view: "checklist", position: endPosition(null, null) });
+}
+// Every reminder is a todo you can tick off. One about nothing in particular gets its own in the Reminders list,
+// with the reminder's id, so the phone and the website linking the same reminder make one item, not two.
+function makeTodoFor(r) {
+  if (node(r.id)) return node(r.id);
+  const list = ensureRemindersList(), t = nowISO();
+  const n = { id: r.id, parent_id: list.id, kind: "item", title: r.title, body: null, status: "todo", view: "list", color: null, column_type: null, details: null, due_at: null, estimate_minutes: null, position: endPosition(list.id, null), created_at: t, updated_at: t, deleted: false };
+  S.nodes.push(n); S.byID.set(n.id, n);
+  write(db.from("nodes").upsert(n));
+  return n;
+}
+// After loading: link reminders that have no todo yet, and open ticked repeating ones again once they went off again.
+function reconcileReminders() {
+  const now = new Date();
+  for (const r of S.reminders) {
+    if (r.done) continue;
+    if (!r.node_id) { patchReminder(r.id, { node_id: makeTodoFor(r).id }); continue; }
+    const n = node(r.node_id);
+    if (n && n.status === "done" && r.repeat_rule && inRemindersList(n) && occurrences(r, new Date(n.updated_at), now).length) patchNode(n.id, { status: "todo" });
+  }
 }
 function setStatus(id, status, at) {
   const n = node(id);
@@ -433,8 +466,11 @@ function deleteNodesQuiet(ids) {
 }
 function saveReminder(r) {
   const existing = S.reminders.find((x) => x.id === r.id);
+  const own = node(r.node_id);
+  if (own && inRemindersList(own) && own.title !== r.title) patchNode(own.id, { title: r.title });
   if (existing) { patchReminder(r.id, { title: r.title, fire_at: r.fire_at, kind: r.kind, repeat_rule: r.repeat_rule, node_id: r.node_id, done: false }); }
   else {
+    if (!r.node_id) r = { ...r, node_id: makeTodoFor(r).id };
     const row = { ...r, done: false, deleted: false, updated_at: nowISO() };
     S.reminders.push(row);
     write(db.from("reminders").insert(row));
@@ -444,10 +480,18 @@ function saveReminder(r) {
 }
 function deleteReminder(id) {
   const r = S.reminders.find((x) => x.id === id);
+  // Its own todo in the Reminders list goes with it. Items elsewhere stay.
+  const own = r && inRemindersList(node(r.node_id)) ? node(r.node_id) : null;
   S.reminders = S.reminders.filter((x) => x.id !== id);
   write(db.from("reminders").update({ deleted: true, updated_at: nowISO() }).eq("id", id));
+  if (own) deleteNodesQuiet([own.id]);
   render();
-  if (r) toast(`Deleted ${r.title}`, { action: () => { S.reminders.push(r); write(db.from("reminders").update({ deleted: false, updated_at: nowISO() }).eq("id", id)); render(); } });
+  if (r) toast(`Deleted ${r.title}`, { action: () => {
+    S.reminders.push(r);
+    write(db.from("reminders").update({ deleted: false, updated_at: nowISO() }).eq("id", id));
+    if (own) { const t = nowISO(); own.deleted = false; own.updated_at = t; S.nodes.push(own); S.byID.set(own.id, own); write(db.from("nodes").update({ deleted: false, updated_at: t }).eq("id", own.id)); }
+    render();
+  } });
 }
 
 // ---------- Loading ----------
@@ -472,6 +516,7 @@ async function load() {
   S.reminders = r.data;
   S.log = l.data;
   S.byID = new Map(S.nodes.map((x) => [x.id, x]));
+  reconcileReminders();
   render();
 }
 function startSync() {
@@ -590,9 +635,16 @@ function addRow(parentID, placeholder = "Add item", kind = "item", extra = "") {
 }
 const empty = (title, text) => `<div class="empty"><b>${esc(title)}</b>${esc(text)}</div>`;
 const entryIcon = (e) => (e.kind === "alarm" ? "alarm" : e.kind === "deadline" ? "flag" : "bell");
+// A reminder about an item opens the item. One with its own todo in the Reminders list opens its editor.
 function entryAttrs(e) {
-  return e.reminder ? `data-act="${e.reminder.node_id && node(e.reminder.node_id) ? "open" : "reminder"}" data-id="${e.reminder.node_id && node(e.reminder.node_id) ? e.reminder.node_id : e.reminder.id}"` : `data-act="open" data-id="${e.node.id}"`;
+  if (!e.reminder) return `data-act="open" data-id="${e.node.id}"`;
+  const item = node(e.reminder.node_id);
+  return item && !inRemindersList(item) ? `data-act="open" data-id="${item.id}"` : `data-act="reminder" data-id="${e.reminder.id}"`;
 }
+// The todo an entry ticks off: the reminder's item, or the item with the deadline.
+const entryTodo = (e) => (e.reminder ? node(e.reminder.node_id) : e.node);
+const entryCheck = (e) => { const n = entryTodo(e); return n && n.kind === "item" ? checkbox(n) : ""; };
+const entryDone = (e) => (entryTodo(e)?.status === "done" ? "done" : "");
 
 // ----- Home -----
 function screenHome() {
@@ -620,7 +672,7 @@ function screenHome() {
       <section class="glass card">
         <div class="card-head"><a class="link" href="#/reminders"><h2>Reminders<span class="count">${up.length + todos.length}</span></h2><span class="chev">${I("right")}</span></a></div>
         ${!up.length && !todos.length ? '<div class="hint">Tap + to add a reminder or alarm.</div>' : ""}
-        ${up.map((e) => `<div class="row plain" ${entryAttrs(e)}><span class="bullet" style="${e.kind === "alarm" ? "color:var(--accent)" : ""}">${I(entryIcon(e))}</span><div class="text"><div class="t">${esc(e.title)}</div><div class="s">${dayText(e.when, true)} at ${fmtTime(e.when)}${e.reminder?.repeat_rule ? " · " + repeatText(e.reminder.repeat_rule) : ""}</div></div>${e.kind === "alarm" ? '<span class="badge alarm">Alarm</span>' : ""}<span class="chev">${I("right")}</span></div>`).join("")}
+        ${up.map((e) => `<div class="row plain ${entryDone(e)}" ${entryAttrs(e)}>${entryCheck(e)}<span class="bullet" style="${e.kind === "alarm" ? "color:var(--accent)" : ""}">${I(entryIcon(e))}</span><div class="text"><div class="t">${esc(e.title)}</div><div class="s">${dayText(e.when, true)} at ${fmtTime(e.when)}${e.reminder?.repeat_rule ? " · " + repeatText(e.reminder.repeat_rule) : ""}</div></div>${e.kind === "alarm" ? '<span class="badge alarm">Alarm</span>' : ""}<span class="chev">${I("right")}</span></div>`).join("")}
         ${todos.length ? `<div class="eyebrow" style="padding:14px 6px 4px">To do</div>${todos.slice(0, 3).map((n) => row(n, { into: false, dragable: false })).join("")}` : ""}
       </section>
     </div>
@@ -757,7 +809,7 @@ function screenReminders() {
     <div class="right"><button class="btn glass" data-act="newreminder" data-kind="reminder">${I("bell")}<span class="label">Reminder</span></button><button class="btn glass" data-act="newreminder" data-kind="alarm">${I("alarm")}<span class="label">Alarm</span></button></div>
   </div>
   <section class="glass card">
-    ${up.length ? up.map((e) => `<div class="row plain" ${entryAttrs(e)}><span class="bullet" style="${e.kind === "alarm" ? "color:var(--accent)" : ""}">${I(entryIcon(e))}</span><div class="text"><div class="t">${esc(e.title)}</div><div class="s">${dayText(e.when, true)} at ${fmtTime(e.when)}${e.reminder?.repeat_rule ? " · " + repeatText(e.reminder.repeat_rule) : ""}${e.reminder?.node_id && node(e.reminder.node_id) ? " · " + esc(node(e.reminder.node_id).title) : ""}</div></div>${e.kind === "alarm" ? '<span class="badge alarm">Alarm</span>' : e.kind === "deadline" ? '<span class="badge todo">Deadline</span>' : ""}${e.reminder ? `<button class="more" style="opacity:1" data-act="reminder" data-id="${e.reminder.id}">${I("pencil")}</button>` : ""}</div>`).join("") : empty("Nothing coming up", "Add a reminder or an alarm with the buttons above.")}
+    ${up.length ? up.map((e) => `<div class="row plain ${entryDone(e)}" ${entryAttrs(e)}>${entryCheck(e)}<span class="bullet" style="${e.kind === "alarm" ? "color:var(--accent)" : ""}">${I(entryIcon(e))}</span><div class="text"><div class="t">${esc(e.title)}</div><div class="s">${dayText(e.when, true)} at ${fmtTime(e.when)}${e.reminder?.repeat_rule ? " · " + repeatText(e.reminder.repeat_rule) : ""}${e.reminder?.node_id && node(e.reminder.node_id) ? " · " + esc(node(e.reminder.node_id).title) : ""}</div></div>${e.kind === "alarm" ? '<span class="badge alarm">Alarm</span>' : e.kind === "deadline" ? '<span class="badge todo">Deadline</span>' : ""}${e.reminder ? `<button class="more" style="opacity:1" data-act="reminder" data-id="${e.reminder.id}">${I("pencil")}</button>` : ""}</div>`).join("") : empty("Nothing coming up", "Add a reminder or an alarm with the buttons above.")}
     ${todos.length ? `<div class="eyebrow" style="padding:16px 6px 4px">To do</div><div class="rows-list" data-zone data-parent="${remindersList().id}">${todos.map((n) => row(n, { into: false })).join("")}</div>` : ""}
   </section>`;
 }

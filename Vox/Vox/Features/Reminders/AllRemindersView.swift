@@ -26,8 +26,7 @@ struct AllRemindersView: View {
                     }
                     ForEach(Array(entries.enumerated()), id: \.element.id) { index, entry in
                         if index > 0 { Divider().overlay(.white.opacity(0.08)) }
-                        Button { open(entry) } label: { DatedRow(entry: entry) }
-                            .buttonStyle(.plain)
+                        TickableDatedRow(entry: entry) { open(entry) }
                             .contextMenu {
                                 if case .reminder(let reminder) = entry.source {
                                     Button("Edit", systemImage: "pencil") { editing = reminder }
@@ -44,14 +43,14 @@ struct AllRemindersView: View {
         .scrollIndicators(.hidden)
         .overScenery()
         .navigationTitle("All Reminders")
-        .animation(.snappy, value: notes.reminderTodos().map(\.id))
+        .animation(.snappy, value: reminders.untimed(notes.reminderTodos()).map(\.id))
         .sheet(item: $editing) { ReminderEditor(reminder: $0) }
     }
 
     /// Todos with no time, from the Reminders list. Hidden when there are none.
     @ViewBuilder
     private var todoCard: some View {
-        let todos = notes.reminderTodos()
+        let todos = reminders.untimed(notes.reminderTodos())
         if !todos.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
@@ -74,7 +73,7 @@ struct AllRemindersView: View {
         switch entry.source {
         case .deadline(let node): openNode(node)
         case .reminder(let reminder):
-            if let node = reminder.nodeID.flatMap(reminders.node(id:)) { openNode(node) } else { editing = reminder }
+            if let node = reminders.linkedItem(of: reminder) { openNode(node) } else { editing = reminder }
         }
     }
 }

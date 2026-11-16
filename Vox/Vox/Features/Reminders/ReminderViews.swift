@@ -280,3 +280,21 @@ struct TodoList: View {
         }
     }
 }
+
+/// A reminder, alarm or deadline as a todo: tick it off on the left, tap the rest to open it.
+/// Ticking a repeating reminder counts for this time only. It opens again when it next goes off.
+struct TickableDatedRow: View {
+    let entry: RemindersModel.Entry
+    let open: () -> Void
+    @Environment(RemindersModel.self) private var reminders
+
+    var body: some View {
+        let todo = reminders.todo(for: entry)
+        HStack(spacing: 8) {
+            if let todo { StatusCheckbox(node: todo) }
+            Button(action: open) { DatedRow(entry: entry) }
+                .buttonStyle(.plain)
+                .opacity(todo?.status == .done ? 0.45 : 1)
+        }
+    }
+}

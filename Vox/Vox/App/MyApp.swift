@@ -30,6 +30,7 @@ import SwiftUI
         )
         // An item marked done (by hand or by voice) cancels its reminders.
         notes.onChange = { reminders.reconcile() }
+        reminders.onNodesChanged = { notes.redraw() }
         let gemini = GeminiSettings()
         let actionLog = SwiftDataActionLogStore(container: container)
         let brain = Brain(
@@ -85,7 +86,8 @@ import SwiftUI
                 .onOpenURL { url in Task { await auth.handle(url) } }
                 // Coming back to the app picks up changes made elsewhere.
                 .onChange(of: scenePhase) { _, phase in
-                    if phase == .active { Task { await sync.syncNow() } }
+                    // A ticked repeating reminder opens again once it next goes off.
+                    if phase == .active { reminders.reconcile(); Task { await sync.syncNow() } }
                 }
                 .task { await reminders.rescheduleAll() }
         }

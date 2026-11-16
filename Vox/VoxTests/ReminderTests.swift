@@ -96,6 +96,82 @@ struct ReminderTests {
         #expect(model.busyDays(in: DateInterval(start: tomorrow, duration: 86_400)) == [tomorrow])
     }
 
+    // MARK: Every reminder is a todo
+
+    @Test func standaloneReminderGetsATodoInReminders() async throws {
+        let (model, nodes, scheduler) = try makeModel()
+        let reminder = Reminder(title: "Call mom", fireAt: .now.addingTimeInterval(3600))
+        model.save(reminder)
+        let saved = try #require(model.reminders(for: reminder.id).first)
+        let todo = try #require(try nodes.node(id: reminder.id))
+        #expect(saved.nodeID == todo.id && todo.title == "Call mom" && todo.status == .todo)
+        #expect(nodes.isInRemindersList(todo))
+        #expect(model.linkedItem(of: saved) == nil)
+
+        // Ticking the todo cancels a one-time reminder.
+        var ticked = todo
+        ticked.status = .done
+        try nodes.update(ticked)
+        model.reconcile()
+        #expect(model.reminders(for: todo.id).isEmpty)
+        for _ in 0..<50 where scheduler.scheduled.contains(reminder.id) { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(!scheduler.scheduled.contains(reminder.id))
+    }
+
+    @Test func renamingAndDeletingFollowTheTodo() throws {
+        let (model, nodes, _) = try makeModel()
+        var reminder = Reminder(title: "Pay bill", fireAt: .now.addingTimeInterval(3600))
+        model.save(reminder)
+        reminder = try #require(model.reminders(for: reminder.id).first)
+        reminder.title = "Pay rent"
+        model.save(reminder)
+        #expect(try nodes.node(id: reminder.id)?.title == "Pay rent")
+        model.delete(reminder)
+        #expect(try nodes.node(id: reminder.id) == nil)
+    }
+
+    @Test func oldStandaloneRemindersGetATodoOnReconcile() throws {
+        let container = try LocalDatabase.inMemory()
+        let nodes = SwiftDataNodeStore(container: container)
+        let store = SwiftDataReminderStore(container: container)
+        let reminder = Reminder(title: "Gym", fireAt: .now.addingTimeInterval(3600))
+        try store.save(reminder)
+        let model = RemindersModel(store: store, nodes: nodes, scheduler: FakeReminderScheduler())
+        var redrawn = false
+        model.onNodesChanged = { redrawn = true }
+        model.reconcile()
+        #expect(try store.reminder(id: reminder.id)?.nodeID == reminder.id)
+        #expect(try nodes.node(id: reminder.id)?.status == .todo)
+        #expect(redrawn)
+    }
+
+    @Test func tickedRepeatOpensAgainWhenItNextGoesOff() throws {
+        let (model, nodes, _) = try makeModel()
+        let start = Date.now.addingTimeInterval(-3600)
+        let reminder = Reminder(title: "Water plants", fireAt: start, repeatRule: .daily)
+        model.save(reminder)
+        var todo = try #require(try nodes.node(id: reminder.id))
+        todo.status = .done
+        try nodes.update(todo)
+
+        // Ticked today: stays ticked, and the reminder keeps repeating.
+        model.reconcile()
+        #expect(try nodes.node(id: todo.id)?.status == .done)
+        #expect(model.reminders(for: todo.id).count == 1)
+
+        // Tomorrow, after it goes off again, it is a todo again.
+        model.reconcile(now: start.addingTimeInterval(86_400 + 60))
+        #expect(try nodes.node(id: todo.id)?.status == .todo)
+    }
+
+    @Test func untimedHidesTodosWithAReminderAhead() throws {
+        let (model, nodes, _) = try makeModel()
+        model.save(Reminder(title: "Later", fireAt: .now.addingTimeInterval(3600)))
+        let list = try nodes.remindersList()
+        try nodes.create(kind: .item, title: "Buy milk", parentID: list.id, status: .todo)
+        #expect(model.untimed(try nodes.children(of: list.id)).map(\.title) == ["Buy milk"])
+    }
+
     @Test func dayKeepsWhatAlreadyWentOff() throws {
         let (model, _, _) = try makeModel()
         let today = Calendar.current.startOfDay(for: .now)
@@ -153,6 +229,25 @@ struct VoiceReminderTests {
         #expect(calendar.component(.hour, from: saved.fireAt) == 17)
         #expect(result.reminders.map(\.id) == [saved.id])
         #expect(result.inverse.contains(.removeReminder(saved.id)))
+    }
+
+    @Test func standaloneVoiceReminderGetsATodo() throws {
+        let container = try LocalDatabase.inMemory()
+        let nodes = SwiftDataNodeStore(container: container)
+        let store = SwiftDataReminderStore(container: container)
+        let context = BrainContext(store: nodes)
+        context.reminders = store
+
+        let result = try ActionExecutor(context: context, now: now).apply([
+            BrainAction(type: .createReminder, title: "Call mom", timePhrase: "tomorrow 6pm"),
+        ])
+        let saved = try #require(try store.all().first)
+        let todo = try #require(saved.nodeID.flatMap { try nodes.node(id: $0) })
+        #expect(todo.title == "Call mom" && todo.status == .todo && nodes.isInRemindersList(todo))
+
+        // Undo removes the todo too.
+        try nodes.apply(result.inverse)
+        #expect(try nodes.node(id: todo.id) == nil)
     }
 
     @Test func failedCommandSavesNoReminder() throws {

@@ -202,13 +202,15 @@ final class ActionExecutor {
             }
             let title = action.title.flatMap { $0.trimmingCharacters(in: .whitespaces).isEmpty ? nil : $0 } ?? linked?.title
             let kind: ReminderKind = action.reminderKind == .alarm ? .alarm : .reminder
-            let reminder = Reminder(
+            var reminder = Reminder(
                 nodeID: linked?.id,
                 title: try required(title, "what to remind you about"),
                 fireAt: fireAt,
                 kind: kind,
                 repeatRule: DatePhrase.repeatRule(in: phrase)
             )
+            // Every reminder is a todo you can tick off. One about nothing in particular gets its own in Reminders.
+            if linked == nil { reminder.nodeID = try store.makeTodo(for: reminder).id }
             newReminders.append(reminder)
             let when = reminder.repeatRule.map { "\($0.label.lowercased()) at \(fireAt.formatted(date: .omitted, time: .shortened))" }
                 ?? fireAt.formatted(.dateTime.weekday(.abbreviated).hour().minute())
@@ -228,10 +230,7 @@ final class ActionExecutor {
     static let remindersListTitle = Node.remindersListTitle
 
     private func remindersList() throws -> Node {
-        if let list = try store.children(of: nil).first(where: \.isRemindersList) {
-            return list
-        }
-        return try store.create(kind: .item, title: Self.remindersListTitle, parentID: nil, view: .checklist)
+        try store.remindersList()
     }
 
     /// Adds an item under `parent`, following the parent's view.

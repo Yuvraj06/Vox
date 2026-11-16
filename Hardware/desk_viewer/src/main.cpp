@@ -401,13 +401,15 @@ bool fetchAll() {
 void completeTask(const String& id) {
   setStatus("Saving");
   String reply, newParent;
+  bool ownTodo = false;  // lives in the Reminders list: a repeating reminder keeps going, ticked for this time only
   if (request("GET", "/rest/v1/nodes?select=parent_id&id=eq." + id, "", reply) != 200) return;
   JsonDocument card;
   deserializeJson(card, reply);
   const char* parent = card[0]["parent_id"] | "";
-  if (*parent && request("GET", "/rest/v1/nodes?select=parent_id,column_type&id=eq." + String(parent), "", reply) == 200) {
+  if (*parent && request("GET", "/rest/v1/nodes?select=parent_id,column_type,title&id=eq." + String(parent), "", reply) == 200) {
     JsonDocument column;
     deserializeJson(column, reply);
+    ownTodo = column[0]["parent_id"].isNull() && strcasecmp(column[0]["title"] | "", "reminders") == 0;
     const char* type = column[0]["column_type"] | "";
     const char* board = column[0]["parent_id"] | "";
     if (*type && strcmp(type, "done") != 0 && *board &&
@@ -423,7 +425,7 @@ void completeTask(const String& id) {
   body += "}";
   const int code = request("PATCH", "/rest/v1/nodes?id=eq." + id, body, reply);
   Serial.printf("Complete %s -> %d\n", id.c_str(), code);
-  request("PATCH", "/rest/v1/reminders?node_id=eq." + id + "&done=eq.false", "{\"done\":true,\"updated_at\":\"" + stamp + "\"}", reply);
+  request("PATCH", "/rest/v1/reminders?node_id=eq." + id + "&done=eq.false" + (ownTodo ? "&repeat_rule=is.null" : ""), "{\"done\":true,\"updated_at\":\"" + stamp + "\"}", reply);
 }
 
 // Settings are read on this core through a copy taken under the lock.

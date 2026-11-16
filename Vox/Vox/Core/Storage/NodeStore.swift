@@ -84,3 +84,35 @@ extension NodeStore {
         return chain
     }
 }
+
+extension NodeStore {
+    /// The top level Reminders list. Made the first time it's needed.
+    func remindersList() throws -> Node {
+        if let list = try children(of: nil).first(where: \.isRemindersList) { return list }
+        return try create(kind: .item, title: Node.remindersListTitle, parentID: nil, view: .checklist)
+    }
+
+    /// True for a todo that lives directly in the Reminders list.
+    func isInRemindersList(_ node: Node) -> Bool {
+        guard let parentID = node.parentID, let parent = (try? self.node(id: parentID)) ?? nil else { return false }
+        return parent.isRemindersList
+    }
+
+    /// The todo a reminder ticks off: a new item in the Reminders list with the reminder's own id,
+    /// so two devices linking the same reminder make the same item, not two.
+    func makeTodo(for reminder: Reminder) throws -> Node {
+        if let existing = try node(id: reminder.id) { return existing }
+        let list = try remindersList()
+        let last = try children(of: list.id).last?.position
+        let item = Node(
+            id: reminder.id,
+            parentID: list.id,
+            kind: .item,
+            title: reminder.title,
+            status: .todo,
+            position: NodeOrdering.position(between: last, and: nil)
+        )
+        try insert(item)
+        return item
+    }
+}

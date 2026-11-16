@@ -134,7 +134,7 @@ struct HomeView: View {
 
     private var allReminders: some View {
         let upcoming = reminders.upcoming()
-        let todos = notes.reminderTodos()
+        let todos = reminders.untimed(notes.reminderTodos())
         return VStack(alignment: .leading, spacing: 0) {
             NavigationLink(value: Route.allReminders) {
                 CardHeader(title: "Reminders", count: upcoming.count + todos.count)
@@ -147,8 +147,7 @@ struct HomeView: View {
             }
             ForEach(Array(upcoming.prefix(6).enumerated()), id: \.element.id) { index, entry in
                 if index > 0 { Divider().overlay(.white.opacity(0.08)) }
-                Button { open(entry) } label: { DatedRow(entry: entry) }
-                    .buttonStyle(.plain)
+                TickableDatedRow(entry: entry) { open(entry) }
             }
             if !todos.isEmpty {
                 Text("TO DO")
@@ -204,7 +203,7 @@ struct HomeView: View {
         case .deadline(let node):
             openNode(node)
         case .reminder(let reminder):
-            if let node = reminder.nodeID.flatMap(reminders.node(id:)) { openNode(node) } else { editingReminder = reminder }
+            if let node = reminders.linkedItem(of: reminder) { openNode(node) } else { editingReminder = reminder }
         }
     }
 
