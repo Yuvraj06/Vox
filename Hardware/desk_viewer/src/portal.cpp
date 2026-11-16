@@ -34,16 +34,27 @@ input[type=range]{padding:0;height:4px;appearance:none;background:rgba(255,255,2
 .ok{color:#8CD1B3}.bad{color:#FF8C85}
 #msg{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#8CD9FF;color:#0A1724;padding:10px 18px;border-radius:999px;font-weight:600;opacity:0;transition:.3s;pointer-events:none}#msg.on{opacity:1}
 .hint{font-size:12px;color:var(--t2);margin-top:6px}
+.hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}.hd h2{margin:0}
+button.sm{padding:7px 14px;font-size:13px}
+.net{display:flex;align-items:center;gap:12px;width:100%;text-align:left;background:none;border-radius:12px;padding:12px 10px;font-weight:500;border-top:1px solid var(--line)}
+.net:first-child{border-top:0}.net:hover{background:rgba(255,255,255,.06)}
+.net.on{background:rgba(140,217,255,.14);color:var(--a)}
+.net .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bars{display:inline-flex;align-items:flex-end;gap:2px;height:14px}.bars i{width:3px;background:rgba(255,255,255,.25);border-radius:1px}.bars i.f{background:currentColor}
+.lock{font-size:12px;opacity:.6}
 </style></head><body><main>
 <h1>Vo<b>x</b> Desk</h1><p class="sub">Setup and settings for the desk viewer.</p>
 <form id="f">
 <div class="card"><h2>Status</h2>
 <div class="st"><b>Wi-Fi</b><span id="sw"></span></div>
 <div class="st"><b>Account</b><span id="sa"></span></div></div>
-<div class="card"><h2>Wi-Fi</h2>
-<label>Network name (2.4 GHz only)</label>
-<div class="row"><input name="ssid" list="nets" autocomplete="off"><button type="button" id="scan">Scan</button></div><datalist id="nets"></datalist>
-<label>Password</label><input name="wpass" type="password" placeholder="(unchanged)" autocomplete="off"></div>
+<div class="card"><div class="hd"><h2>Wi-Fi</h2><button type="button" id="scan" class="sm">Refresh</button></div>
+<div id="cur" class="hint" style="margin:0 0 8px"></div>
+<div id="nets"><div class="hint">Looking for networks...</div></div>
+<input type="hidden" name="ssid">
+<div id="other" style="display:none"><label>Network name</label><input id="ossid" autocomplete="off" placeholder="Hidden network name"></div>
+<div id="pw" style="display:none"><label>Password for <span id="pwn"></span></label><input name="wpass" type="password" autocomplete="off" placeholder="Wi-Fi password"></div>
+<p class="hint">Only 2.4 GHz networks show up. The ESP32 cannot use 5 GHz.</p></div>
 <div class="card"><h2>Vox account</h2><p class="hint" style="margin:0 0 4px">Same email and password as the app.</p>
 <label>Email</label><input name="email" type="email" autocomplete="off">
 <label>Password</label><input name="vpass" type="password" placeholder="(unchanged)" autocomplete="off"></div>
@@ -71,16 +82,32 @@ $('#screens').innerHTML=N.map((n,i)=>`<div class="chk"><input type="checkbox" na
 f.idle.innerHTML=N.map((n,i)=>`<option value="${i}">${n}</option>`).join('');
 f.bright.oninput=()=>$('#bv').textContent=Math.round(f.bright.value/255*100)+'%';
 $('#tz').onchange=()=>$('#tzc').style.display=$('#tz').value==='custom'?'block':'none';
+let first=true,pick='';
 async function load(){const s=await (await fetch('/state')).json();
-f.ssid.value=s.ssid;f.email.value=s.email;f.bright.value=s.bright;f.bright.oninput();f.idle.value=s.idle;f.idleAfter.value=s.idleAfter;f.flip.checked=s.flip;f.clock24.checked=s.clock24;
-N.forEach((n,i)=>f['s'+i].checked=!!(s.screens&(1<<i)));
-const o=[...$('#tz').options].find(o=>o.value===s.tz);$('#tz').value=o?s.tz:'custom';$('#tzc').value=s.tz;$('#tz').onchange();
 $('#sw').innerHTML=s.wifi.startsWith('Connected')?`<span class="ok">${s.wifi}</span>`:`<span class="bad">${s.wifi}</span>`;
-$('#sa').innerHTML=s.account==='Live'?'<span class="ok">Live</span>':`<span class="bad">${s.account}</span>`}
-$('#scan').onclick=async()=>{$('#scan').textContent='...';const r=await (await fetch('/scan')).json();$('#nets').innerHTML=r.map(n=>`<option value="${n}">`).join('');$('#scan').textContent='Scan';if(r.length)msg(r.length+' networks found. Pick one from the list.')};
+$('#sa').innerHTML=s.account==='Live'?'<span class="ok">Live</span>':`<span class="bad">${s.account}</span>`;
+if(!first)return;first=false;
+pick=s.ssid;f.ssid.value=s.ssid;$('#cur').textContent=s.ssid?'Saved: '+s.ssid:'No network saved yet. Pick one below.';
+f.email.value=s.email;f.bright.value=s.bright;f.bright.oninput();f.idle.value=s.idle;f.idleAfter.value=s.idleAfter;f.flip.checked=s.flip;f.clock24.checked=s.clock24;
+N.forEach((n,i)=>f['s'+i].checked=!!(s.screens&(1<<i)));
+const o=[...$('#tz').options].find(o=>o.value===s.tz);$('#tz').value=o?s.tz:'custom';$('#tzc').value=s.tz;$('#tz').onchange()}
+const esc=t=>t.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function bars(r){const n=r>-55?4:r>-65?3:r>-75?2:1;return '<span class="bars">'+[6,9,12,14].map((h,i)=>`<i class="${i<n?'f':''}" style="height:${h}px"></i>`).join('')+'</span>'}
+function choose(ssid,open){pick=ssid;f.ssid.value=ssid;
+document.querySelectorAll('.net').forEach(b=>b.classList.toggle('on',b.dataset.s===ssid&&!b.dataset.other));
+$('#other').style.display='none';$('#pw').style.display=open?'none':'block';$('#pwn').textContent=ssid;f.wpass.value='';if(!open)f.wpass.focus()}
+async function scan(){$('#scan').textContent='Scanning...';$('#scan').disabled=true;
+try{const r=await (await fetch('/scan')).json();
+$('#nets').innerHTML=(r.length?r.map(n=>`<button type="button" class="net ${n.ssid===pick?'on':''}" data-s="${esc(n.ssid)}" data-open="${n.open?1:''}">${bars(n.rssi)}<span class="n">${esc(n.ssid)}</span>${n.open?'':'<span class="lock">&#128274;</span>'}</button>`).join(''):'<div class="hint">No networks found. Tap Refresh.</div>')
++'<button type="button" class="net" data-other="1"><span class="bars"></span><span class="n">Other network...</span></button>';
+document.querySelectorAll('.net').forEach(b=>b.onclick=()=>{if(b.dataset.other){document.querySelectorAll('.net').forEach(x=>x.classList.toggle('on',x===b));$('#other').style.display='block';$('#pw').style.display='block';$('#pwn').textContent='this network';$('#ossid').focus();return}choose(b.dataset.s,!!b.dataset.open)})}
+catch(e){$('#nets').innerHTML='<div class="hint">Scan failed. Tap Refresh.</div>'}
+$('#scan').textContent='Refresh';$('#scan').disabled=false}
+$('#ossid').oninput=()=>{pick=$('#ossid').value.trim();f.ssid.value=pick};
+$('#scan').onclick=scan;
 async function save(restart){const d=new URLSearchParams(new FormData(f));if($('#tz').value==='custom')d.set('tz',$('#tzc').value);d.set('screens',N.reduce((m,n,i)=>m|(f['s'+i].checked?1<<i:0),0));if(restart)d.set('restart','1');
 const r=await fetch('/save',{method:'POST',body:d});msg(restart?'Saved. Restarting...':'Saved');if(!restart)setTimeout(load,2500)}
-f.onsubmit=e=>{e.preventDefault();save(false)};$('#rb').onclick=()=>save(true);load();setInterval(load,10000);
+f.onsubmit=e=>{e.preventDefault();save(false)};$('#rb').onclick=()=>save(true);load().then(scan);setInterval(load,10000);
 </script></body></html>)HTML";
 
 static void sendPage() {
@@ -111,14 +138,32 @@ static void sendState() {
 }
 
 static void sendScan() {
+  // A scan fails while the board is busy trying to join a network. Stop that attempt and try again.
   int n = WiFi.scanNetworks();
+  for (int tries = 0; n < 0 && tries < 2; tries++) {
+    WiFi.disconnect();
+    delay(300);
+    n = WiFi.scanNetworks();
+  }
   JsonDocument d;
   JsonArray arr = d.to<JsonArray>();
-  for (int i = 0; i < n && i < 20; i++) {
+  // Strongest first. The same name from several access points shows once, with the best signal.
+  int order[32];
+  int count = 0;
+  for (int i = 0; i < n && count < 32; i++) order[count++] = i;
+  for (int i = 1; i < count; i++)
+    for (int j = i; j > 0 && WiFi.RSSI(order[j]) > WiFi.RSSI(order[j - 1]); j--) std::swap(order[j], order[j - 1]);
+  for (int k = 0; k < count && arr.size() < 20; k++) {
+    const int i = order[k];
     const String ssid = WiFi.SSID(i);
+    if (!ssid.length()) continue;
     bool dup = false;
-    for (JsonVariant v : arr) if (v.as<String>() == ssid) dup = true;
-    if (ssid.length() && !dup) arr.add(ssid);
+    for (JsonObject v : arr) if (ssid == (const char*)v["ssid"]) dup = true;
+    if (dup) continue;
+    JsonObject o = arr.add<JsonObject>();
+    o["ssid"] = ssid;
+    o["rssi"] = WiFi.RSSI(i);
+    o["open"] = WiFi.encryptionType(i) == WIFI_AUTH_OPEN;
   }
   WiFi.scanDelete();
   String out;
@@ -129,7 +174,12 @@ static void sendScan() {
 static void handleSave() {
   const String ssid = server.arg("ssid"), wpass = server.arg("wpass");
   const String email = server.arg("email"), vpass = server.arg("vpass");
-  if (ssid != S->wifiSSID || wpass.length()) { savedWiFi = true; S->wifiSSID = ssid; if (wpass.length()) S->wifiPass = wpass; }
+  // A new network takes the password typed with it (empty for an open one). Same network, blank password: keep the old one.
+  if (ssid.length() && (ssid != S->wifiSSID || wpass.length())) {
+    savedWiFi = true;
+    if (ssid != S->wifiSSID || wpass.length()) S->wifiPass = wpass;
+    S->wifiSSID = ssid;
+  }
   if (email != S->email || vpass.length()) { savedAccount = true; S->email = email; if (vpass.length()) S->password = vpass; }
   if (server.hasArg("tz") && server.arg("tz").length()) S->timeZone = server.arg("tz");
   S->brightness = constrain(server.arg("bright").toInt(), 5, 255);

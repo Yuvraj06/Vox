@@ -24,13 +24,19 @@ const char* const SCREEN_NAMES[SCR_COUNT] = {"Face", "Clock", "Today", "Tomorrow
 
 static const char* NS = "vox";
 
+// secrets.h copied from the example still has its placeholder text. Treat that as empty.
+static String real(const String& value) {
+  if (value.startsWith("your ") || value == "you@example.com") return "";
+  return value;
+}
+
 void settingsLoad(Settings& s) {
   Preferences p;
   p.begin(NS, false);  // read-write, so the first boot creates the namespace instead of logging an error
-  s.wifiSSID = p.getString("ssid", WIFI_SSID);
-  s.wifiPass = p.getString("wpass", WIFI_PASS);
-  s.email = p.getString("email", VOX_EMAIL);
-  s.password = p.getString("vpass", VOX_PASSWORD);
+  s.wifiSSID = real(p.getString("ssid", WIFI_SSID));
+  s.wifiPass = real(p.getString("wpass", WIFI_PASS));
+  s.email = real(p.getString("email", VOX_EMAIL));
+  s.password = real(p.getString("vpass", VOX_PASSWORD));
   s.timeZone = p.getString("tz", TIME_ZONE);
   s.brightness = p.getUChar("bright", 200);
   s.screens = p.getUChar("screens", 0x3F);
