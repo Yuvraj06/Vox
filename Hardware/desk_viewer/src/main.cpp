@@ -524,6 +524,7 @@ void networkTask(void*) {
 // ---------- Screen (main core) ----------
 
 int page = SCR_HOME;
+int taskIndex = 0;  // which task the Tasks screen shows; tap steps through them
 Snapshot view;
 uint32_t lastTouch = 0;
 
@@ -763,9 +764,10 @@ void drawDay(const char* title, time_t dayStart, time_t now) {
 // The top task, big. Hold to complete it.
 void drawTasks(time_t now) {
   if (view.taskCount == 0) { label("tasks"); centered("all clear", 28, 2); return; }
-  const Task& task = view.tasks[0];
+  if (taskIndex >= view.taskCount) taskIndex = view.taskCount - 1;  // the list got shorter
+  const Task& task = view.tasks[taskIndex];
   const bool late = task.due && task.due < now;
-  label(late ? "late" : task.doing ? "doing" : "task");
+  label((String(late ? "late" : task.doing ? "doing" : "task") + " " + (taskIndex + 1) + "/" + view.taskCount).c_str());
   if (task.due) {
     const String due = dayLabel(task.due, now) + " " + clockText(task.due);
     display.setCursor(W - due.length() * 6, 0);
@@ -778,10 +780,9 @@ void drawTasks(time_t now) {
   display.print(t.substring(0, 10));
   if (t.length() > 10) { display.setCursor(0, 32); display.print(fit(t.substring(10).c_str(), 10)); }
   display.setTextSize(1);
-  if (view.taskCount > 1) {
+  if (taskIndex + 1 < view.taskCount) {
     display.setCursor(0, 52);
-    display.print("then " + fit(view.tasks[1].title, 14));
-    if (view.taskCount > 2) { display.setCursor(W - 18, 52); display.printf("+%d", view.taskCount - 2); }
+    display.print("then " + fit(view.tasks[taskIndex + 1].title, 16));
   }
 }
 
@@ -870,12 +871,15 @@ void onTap() {
   if (ringing) { ringing = false; return; }
   if (doneShowing) { doneShowing = false; return; }
   if (showingSetup) { showingSetup = false; return; }
+  // On Tasks, a tap shows the next task. After the last one it moves on to the next screen.
+  if (page == SCR_TASKS && taskIndex + 1 < view.taskCount) { taskIndex++; return; }
   page = nextPage(page);
+  taskIndex = 0;
 }
 
 void onHold() {
   if (page == SCR_TASKS && view.taskCount > 0 && !completeWanted) {
-    strlcpy(completeID, view.tasks[0].id, sizeof completeID);
+    strlcpy(completeID, view.tasks[min(taskIndex, view.taskCount - 1)].id, sizeof completeID);
     completeWanted = true;
   } else {
     refreshNow = true;
@@ -937,7 +941,7 @@ void loop() {
   }
   wasDown = down;
 
-  if (page != settings.idle && !showingSetup && ms - lastTouch > settings.idleAfter * 1000UL) page = settings.idle;
+  if (page != settings.idle && !showingSetup && ms - lastTouch > settings.idleAfter * 1000UL) { page = settings.idle; taskIndex = 0; }
 
   // The admin page and anything it changed.
   PortalStatus ps;

@@ -53,8 +53,8 @@ Everything is saved in the board's own flash, so it survives unplugging.
 
 | Touch | Does |
 |---|---|
-| Tap | Next screen |
-| Hold 1 s, let go | On Tasks: marks the top task done. Elsewhere: refreshes now |
+| Tap | Next screen. On Tasks: next task, then the next screen after the last one |
+| Hold 1 s, let go | On Tasks: marks the task on screen done. Elsewhere: refreshes now |
 | Hold 7 s | Opens the setup page (hold 7 s again to close it) |
 | Tap while an alarm rings | Stops it |
 
@@ -67,7 +67,7 @@ Screens. One thing per screen, drawn big enough to read from across the desk:
   down to the next thing whenever it is. Sleepy with "zzz" from 11 pm to 6 am. Big smile after a task is completed.
 - **Clock**: huge time with the date under it.
 - **Today** and **Tomorrow**: up to three rows, big time and small title. Things that already went off are struck through.
-- **Tasks**: the top task in big text, "then ..." under it. Hold 1 s to complete it.
+- **Tasks**: one task in big text with its number (like 2/5), "then ..." under it. Tap for the next task. Hold 1 s to complete the one on screen.
 - **Done**: pops up for 4 seconds whenever a task becomes done anywhere.
 - **Alarm**: flashes when an alarm's time comes. Tap to stop.
 
