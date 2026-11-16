@@ -922,6 +922,8 @@ void setup() {
   centered("desk viewer", 48, 1);
   display.display();
 
+  // The web server needs the Wi-Fi stack running first.
+  WiFi.mode(WIFI_STA);
   portalBegin(&settings);
   xTaskCreatePinnedToCore(networkTask, "network", 16384, nullptr, 1, nullptr, 0);
 }

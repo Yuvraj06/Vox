@@ -26,7 +26,7 @@ static const char* NS = "vox";
 
 void settingsLoad(Settings& s) {
   Preferences p;
-  p.begin(NS, true);
+  p.begin(NS, false);  // read-write, so the first boot creates the namespace instead of logging an error
   s.wifiSSID = p.getString("ssid", WIFI_SSID);
   s.wifiPass = p.getString("wpass", WIFI_PASS);
   s.email = p.getString("email", VOX_EMAIL);
