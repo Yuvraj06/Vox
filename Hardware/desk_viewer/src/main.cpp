@@ -941,7 +941,8 @@ void loop() {
   }
   wasDown = down;
 
-  if (page != settings.idle && !showingSetup && ms - lastTouch > settings.idleAfter * 1000UL) { page = settings.idle; taskIndex = 0; }
+  if (page != settings.idle && !showingSetup && ms - lastTouch > settings.idleAfter * 1000UL) page = settings.idle;
+  if (taskIndex && ms - lastTouch > settings.idleAfter * 1000UL) taskIndex = 0;  // back to the first task when left alone
 
   // The admin page and anything it changed.
   PortalStatus ps;
