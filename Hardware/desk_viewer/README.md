@@ -60,17 +60,15 @@ Everything is saved in the board's own flash, so it survives unplugging.
 
 A bar along the bottom fills while you hold, with a "setup in 3" countdown after the first second.
 
-Screens:
+Screens. One thing per screen, drawn big enough to read from across the desk:
 
-- **Face** (idle by default): two soft eyes that blink and look around, with a small clock. Sleepy with
-  "zzz" from 11 pm to 6 am. Happy eyes and a big smile for a few seconds after a task is completed.
-  Shows a countdown at the bottom when something is less than an hour away.
-- **Clock**: date, big clock, "Alarm in 07:42:10", tasks done today and still to do.
-- **Today**: reminders, alarms and deadlines today in order. Things that already went off are struck through.
-- **Tomorrow**: the same for tomorrow.
-- **Upcoming**: big countdown to the very next thing, then the two after it.
-- **Tasks**: the most important four. `!` late, `>` doing. The top one is highlighted; hold 1 s to complete it.
-- **Completed**: pops up for 4 seconds whenever a task becomes done anywhere.
+- **Home** (idle by default): if something is still due today, a big countdown to it with its name and time.
+  Otherwise the face: two eyes that blink and look around, a small clock, and one line at the bottom counting
+  down to the next thing whenever it is. Sleepy with "zzz" from 11 pm to 6 am. Big smile after a task is completed.
+- **Clock**: huge time with the date under it.
+- **Today** and **Tomorrow**: up to three rows, big time and small title. Things that already went off are struck through.
+- **Tasks**: the top task in big text, "then ..." under it. Hold 1 s to complete it.
+- **Done**: pops up for 4 seconds whenever a task becomes done anywhere.
 - **Alarm**: flashes when an alarm's time comes. Tap to stop.
 
 It asks Supabase every 10 seconds.

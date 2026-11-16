@@ -20,7 +20,7 @@
 #define TIME_ZONE "IST-5:30"
 #endif
 
-const char* const SCREEN_NAMES[SCR_COUNT] = {"Face", "Clock", "Today", "Tomorrow", "Upcoming", "Tasks"};
+const char* const SCREEN_NAMES[SCR_COUNT] = {"Home", "Clock", "Today", "Tomorrow", "Tasks"};
 
 static const char* NS = "vox";
 
@@ -39,8 +39,8 @@ void settingsLoad(Settings& s) {
   s.password = real(p.getString("vpass", VOX_PASSWORD));
   s.timeZone = p.getString("tz", TIME_ZONE);
   s.brightness = p.getUChar("bright", 200);
-  s.screens = p.getUChar("screens", 0x3F);
-  s.idle = p.getUChar("idle", SCR_FACE);
+  s.screens = p.getUChar("screens", ALL_SCREENS) & ALL_SCREENS;
+  s.idle = p.getUChar("idle", SCR_HOME);
   s.idleAfter = p.getUShort("idleAfter", 60);
   s.flip = p.getBool("flip", false);
   s.clock24 = p.getBool("clock24", true);

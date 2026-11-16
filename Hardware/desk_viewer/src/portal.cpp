@@ -62,7 +62,7 @@ button.sm{padding:7px 14px;font-size:13px}
 <label>Brightness <span id="bv"></span></label><input name="bright" type="range" min="5" max="255">
 <label>Screens a tap cycles through</label>
 <div id="screens"></div>
-<label>Idle screen (after no touch for a while)</label><select name="idle"></select>
+<label>Idle screen (after no touch for a while). Home shows the face when nothing is due today.</label><select name="idle"></select>
 <label>Go back to idle after (seconds)</label><input name="idleAfter" type="number" min="10" max="3600">
 <div class="chk" style="margin-top:10px"><input type="checkbox" name="flip" id="flip"><span>Screen is mounted upside down</span></div>
 <div class="chk"><input type="checkbox" name="clock24" id="clock24"><span>24 hour clock</span></div>
@@ -183,7 +183,7 @@ static void handleSave() {
   if (email != S->email || vpass.length()) { savedAccount = true; S->email = email; if (vpass.length()) S->password = vpass; }
   if (server.hasArg("tz") && server.arg("tz").length()) S->timeZone = server.arg("tz");
   S->brightness = constrain(server.arg("bright").toInt(), 5, 255);
-  S->screens = server.arg("screens").toInt() & 0x3F;
+  S->screens = server.arg("screens").toInt() & ALL_SCREENS;
   if (S->screens == 0) S->screens = 1 << SCR_CLOCK;
   S->idle = constrain(server.arg("idle").toInt(), 0, SCR_COUNT - 1);
   if (!S->shows((Screen)S->idle)) for (int i = 0; i < SCR_COUNT; i++) if (S->shows((Screen)i)) { S->idle = i; break; }

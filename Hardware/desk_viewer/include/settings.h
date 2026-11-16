@@ -3,7 +3,8 @@
 #pragma once
 #include <Arduino.h>
 
-enum Screen : uint8_t { SCR_FACE, SCR_CLOCK, SCR_TODAY, SCR_TOMORROW, SCR_UPCOMING, SCR_TASKS, SCR_COUNT };
+enum Screen : uint8_t { SCR_HOME, SCR_CLOCK, SCR_TODAY, SCR_TOMORROW, SCR_TASKS, SCR_COUNT };
+constexpr uint8_t ALL_SCREENS = (1 << SCR_COUNT) - 1;
 extern const char* const SCREEN_NAMES[SCR_COUNT];
 
 struct Settings {

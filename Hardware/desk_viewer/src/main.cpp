@@ -521,7 +521,7 @@ void networkTask(void*) {
 
 // ---------- Screen (main core) ----------
 
-int page = SCR_FACE;
+int page = SCR_HOME;
 Snapshot view;
 uint32_t lastTouch = 0;
 
@@ -575,22 +575,26 @@ String dayLabel(time_t when, time_t now) {
   return String(buf);
 }
 
-// Little page dots, top right.
-void header(const char* title) {
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.print(title);
+// Tiny page dots at the bottom, so you know where you are. Skipped on Home.
+void pageDots() {
   int shown = 0, index = 0;
   for (int i = 0; i < SCR_COUNT; i++) if (settings.shows((Screen)i)) { if (i == page) index = shown; shown++; }
+  if (shown < 2) return;
+  const int x0 = (W - (shown * 6 - 2)) / 2;
   for (int i = 0; i < shown; i++) {
-    const int x = W - (shown - i) * 7 + 2;
-    if (i == index) display.fillCircle(x, 3, 2, SSD1306_WHITE);
-    else display.drawCircle(x, 3, 2, SSD1306_WHITE);
+    if (i == index) display.fillRect(x0 + i * 6, H - 2, 4, 2, SSD1306_WHITE);
+    else display.drawPixel(x0 + i * 6 + 1, H - 1, SSD1306_WHITE);
   }
-  display.drawFastHLine(0, 10, W, SSD1306_WHITE);
 }
 
-// One thing on the clock, for Today, Tomorrow and Upcoming.
+// Small label top left. The status replaces it when something is wrong.
+void label(const char* text) {
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print(strcmp(view.status, "Live") == 0 ? text : view.status);
+}
+
+// One thing on the clock.
 struct Entry {
   time_t when;
   char kind;  // 'r' reminder, 'a' alarm, 'd' deadline
@@ -615,14 +619,17 @@ int entriesUpcoming(time_t now, Entry* out, int max) {
   return n;
 }
 
-// Small glyph for the kind of entry: bell, alarm ring, flag.
-void kindGlyph(int x, int y, char kind) {
-  switch (kind) {
-    case 'a': display.drawCircle(x + 3, y + 4, 3, SSD1306_WHITE); display.drawPixel(x + 3, y + 3, SSD1306_WHITE); display.drawPixel(x + 4, y + 4, SSD1306_WHITE); break;
-    case 'd': display.drawFastVLine(x + 1, y + 1, 7, SSD1306_WHITE); display.fillRect(x + 2, y + 1, 4, 3, SSD1306_WHITE); break;
-    default:  display.drawRoundRect(x + 1, y + 1, 5, 5, 2, SSD1306_WHITE); display.drawFastHLine(x, y + 6, 7, SSD1306_WHITE); display.drawPixel(x + 3, y + 7, SSD1306_WHITE); break;
-  }
+// "14:22" under an hour, "1:14:22" under a day, then "2d 4h". Short, so it can be drawn big.
+String shortCountdown(long s) {
+  if (s < 0) s = 0;
+  char buf[12];
+  if (s >= 86400) snprintf(buf, sizeof buf, "%ldd %ldh", s / 86400, s / 3600 % 24);
+  else if (s >= 3600) snprintf(buf, sizeof buf, "%ld:%02ld:%02ld", s / 3600, s / 60 % 60, s % 60);
+  else snprintf(buf, sizeof buf, "%02ld:%02ld", s / 60, s % 60);
+  return String(buf);
 }
+
+const char* kindWord(char kind) { return kind == 'a' ? "alarm" : kind == 'd' ? "due" : "reminder"; }
 
 const Timed* nextAlarm(time_t now, time_t* when) {
   const Timed* best = nullptr;
@@ -634,14 +641,25 @@ const Timed* nextAlarm(time_t now, time_t* when) {
   return best;
 }
 
-// ----- Face -----
-// Two soft rounded eyes that blink and look around. Sleepy late at night. Big smile after a task is done.
+// ----- Home -----
+// Something still due today: a big countdown to it. Otherwise the face, with the next thing in one line at the bottom.
+
+void drawNext(const Entry& e, time_t now) {
+  label(kindWord(e.kind));
+  const String clock = clockText(e.when);
+  display.setCursor(W - clock.length() * 6, 0);
+  display.print(clock);
+  const String cd = shortCountdown(e.when - now);
+  centered(cd.c_str(), cd.length() <= 7 ? 14 : 18, cd.length() <= 7 ? 3 : 2);
+  centered(fit(e.title, 10).c_str(), 44, 2);
+}
+
 struct Face {
   float lookX = 0, lookY = 0, targetX = 0, targetY = 0;
   uint32_t nextLook = 0, blinkAt = 0, happyUntil = 0;
 } face;
 
-void drawFace(uint32_t ms, time_t now) {
+void drawFace(uint32_t ms, time_t now, const Entry* next) {
   struct tm t;
   localtime_r(&now, &t);
   const bool sleepy = t.tm_hour >= 23 || t.tm_hour < 6;
@@ -649,7 +667,7 @@ void drawFace(uint32_t ms, time_t now) {
 
   if (ms > face.nextLook) {
     face.targetX = random(-8, 9);
-    face.targetY = random(-4, 5);
+    face.targetY = random(-3, 4);
     face.nextLook = ms + random(1500, 4500);
   }
   face.lookX += (face.targetX - face.lookX) * 0.15f;
@@ -657,176 +675,141 @@ void drawFace(uint32_t ms, time_t now) {
   if (ms > face.blinkAt + 160) face.blinkAt = ms + random(2500, 6000);
   const bool blink = ms >= face.blinkAt && ms < face.blinkAt + 160;
 
-  const int cx = 64, cy = 28;
-  const int ex = 22, eyeW = 16, eyeH = sleepy ? 3 : (happy ? 6 : 18);
+  const int cx = 64, cy = 24;
+  const int ex = 24, eyeW = 18, eyeH = happy ? 7 : 20;
   for (int side = -1; side <= 1; side += 2) {
     const int x = cx + side * ex + (int)face.lookX - eyeW / 2;
     const int y = cy + (int)face.lookY - eyeH / 2;
     if (blink || sleepy) {
       display.fillRoundRect(x, cy + (int)face.lookY - 1, eyeW, 3, 1, SSD1306_WHITE);
     } else if (happy) {
-      // Arched happy eyes.
       for (int i = 0; i < eyeW; i++) {
         const float u = (i - eyeW / 2.0f) / (eyeW / 2.0f);
-        const int yy = y + eyeH - (int)((1 - u * u) * eyeH);
-        display.fillRect(x + i, yy, 1, 3, SSD1306_WHITE);
+        display.fillRect(x + i, y + eyeH - (int)((1 - u * u) * eyeH), 1, 3, SSD1306_WHITE);
       }
     } else {
-      display.fillRoundRect(x, y, eyeW, eyeH, 5, SSD1306_WHITE);
+      display.fillRoundRect(x, y, eyeW, eyeH, 6, SSD1306_WHITE);
     }
   }
-  // Mouth.
   const int my = cy + 20;
-  const int mw = happy ? 22 : 10, depth = happy ? 7 : 3;
+  const int mw = happy ? 26 : 12, depth = happy ? 8 : 3;
   for (int i = -mw / 2; i <= mw / 2; i++) {
     const float u = (float)i / (mw / 2.0f);
     const int yy = my + (int)((1 - u * u) * depth);
     display.drawPixel(cx + i + (int)(face.lookX / 2), yy, SSD1306_WHITE);
-    if (happy) display.drawPixel(cx + i + (int)(face.lookX / 2), yy + 1, SSD1306_WHITE);
+    display.drawPixel(cx + i + (int)(face.lookX / 2), yy + 1, SSD1306_WHITE);
   }
   if (sleepy) {
     display.setTextSize(1);
     const int phase = (ms / 700) % 3;
-    for (int i = 0; i <= phase; i++) { display.setCursor(96 + i * 7, 22 - i * 7); display.print("z"); }
+    for (int i = 0; i <= phase; i++) { display.setCursor(100 + i * 7, 18 - i * 7); display.print("z"); }
   }
-  // Small clock top right, status top left when something is wrong.
+
+  // Clock top right, status top left only when something is wrong.
   display.setTextSize(1);
   const String clock = clockText(now);
   display.setCursor(W - clock.length() * 6, 0);
   display.print(clock);
   if (strcmp(view.status, "Live") != 0) { display.setCursor(0, 0); display.print(view.status); }
-  // Hint if something is within the hour.
-  time_t when;
-  Entry e[1];
-  if (entriesUpcoming(now, e, 1) && e[0].when - now < 3600) {
-    const String line = String(e[0].kind == 'a' ? "Alarm " : e[0].kind == 'd' ? "Due " : "") + countdown(e[0].when - now);
-    display.setCursor(0, 56);
-    display.print(line);
+
+  // One line: countdown to the next thing, whenever it is.
+  if (next) {
+    const String cd = shortCountdown(next->when - now);
+    const String line = cd + "  " + fit(next->title, 21 - cd.length() - 2);
+    centered(line.c_str(), 56, 1);
   }
-  (void)when;
+}
+
+void drawHome(uint32_t ms, time_t now) {
+  Entry e[1];
+  const bool any = entriesUpcoming(now, e, 1) > 0;
+  if (any && sameDay(e[0].when, now)) drawNext(e[0], now);
+  else drawFace(ms, now, any ? &e[0] : nullptr);
 }
 
 void drawClock(time_t now) {
   struct tm t;
   localtime_r(&now, &t);
+  if (strcmp(view.status, "Live") != 0) label("");
+  centered(clockText(now).c_str(), 12, 4);
   char buf[24];
-  display.setTextSize(1);
-  strftime(buf, sizeof buf, "%a %d %b", &t);
-  display.setCursor(0, 0);
-  display.print(buf);
-  display.setCursor(W - strlen(view.status) * 6, 0);
-  display.print(view.status);
-
-  centered(clockText(now).c_str(), 13, 3);
-  display.setTextSize(1);
-  time_t when;
-  const Timed* alarm = nextAlarm(now, &when);
-  const String line = alarm ? "Alarm in " + countdown(when - now) : String("No alarm set");
-  centered(line.c_str(), 42, 1);
-  snprintf(buf, sizeof buf, "%d done  %d%s to do", view.doneToday, view.taskCount, view.taskCount >= MAX_TASKS ? "+" : "");
-  centered(buf, 55, 1);
+  strftime(buf, sizeof buf, "%A %d %b", &t);
+  centered(buf, 50, 1);
 }
 
+// Three rows: big time, small title. Starts from the next thing still to come.
 void drawDay(const char* title, time_t dayStart, time_t now) {
-  header(title);
+  label(title);
   Entry e[16];
   const int n = entriesOn(dayStart, e, 16);
-  if (n == 0) { centered("Nothing planned", 30, 1); return; }
-  display.setTextSize(1);
-  // Start from the next thing still to come, so the past does not push it off screen.
+  if (n == 0) { centered("nothing", 28, 2); return; }
   int first = 0;
-  while (first < n && e[first].when < now && n - first > 4) first++;
-  for (int i = first, row = 0; i < n && row < 4; i++, row++) {
-    const int y = 14 + row * 12;
-    const bool past = e[i].when < now;
-    kindGlyph(0, y - 1, e[i].kind);
-    display.setCursor(10, y);
+  while (first < n && e[first].when < now && n - first > 3) first++;
+  for (int i = first, row = 0; i < n && row < 3; i++, row++) {
+    const int y = 12 + row * 17;
+    display.setTextSize(2);
+    display.setCursor(0, y);
     display.print(clockText(e[i].when));
-    display.setCursor(48, y);
-    display.print(fit(e[i].title, 13));
-    if (past) {
-      // Strike through what already went off.
-      display.drawFastHLine(48, y + 3, 78, SSD1306_WHITE);
-    }
-  }
-  if (n - first > 4) { display.setCursor(W - 24, 56); display.printf("+%d", n - first - 4); }
-}
-
-void drawUpcoming(time_t now) {
-  header("UPCOMING");
-  Entry e[8];
-  const int n = entriesUpcoming(now, e, 8);
-  if (n == 0) { centered("Nothing coming up", 26, 1); centered("Add one on the phone", 42, 1); return; }
-  centered(countdown(e[0].when - now).c_str(), 14, 2);
-  display.setTextSize(1);
-  kindGlyph(0, 32, e[0].kind);
-  display.setCursor(10, 33);
-  display.print(fit(e[0].title, 13));
-  const String at = dayLabel(e[0].when, now) + " " + clockText(e[0].when);
-  display.setCursor(W - at.length() * 6, 33);
-  display.print(at);
-  display.drawFastHLine(0, 43, W, SSD1306_WHITE);
-  for (int i = 1; i < n && i < 3; i++) {
-    const int y = 46 + (i - 1) * 10;
-    kindGlyph(0, y - 1, e[i].kind);
-    display.setCursor(10, y);
-    display.print(dayLabel(e[i].when, now) + " " + clockText(e[i].when));
-    display.setCursor(66, y);
+    display.setTextSize(1);
+    display.setCursor(66, y + 4);
     display.print(fit(e[i].title, 10));
+    if (e[i].when < now) display.drawFastHLine(66, y + 7, 60, SSD1306_WHITE);
   }
+  if (n - first > 3) { display.setTextSize(1); display.setCursor(W - 18, 0); display.printf("+%d", n - first - 3); }
 }
 
+// The top task, big. Hold to complete it.
 void drawTasks(time_t now) {
-  header("TASKS");
-  if (view.taskCount == 0) { centered("All clear!", 30, 1); return; }
-  display.setTextSize(1);
-  for (int i = 0; i < view.taskCount && i < 4; i++) {
-    const Task& task = view.tasks[i];
-    const int y = 14 + i * 12;
-    if (i == 0) display.fillRect(0, y - 2, W, 11, SSD1306_WHITE);
-    display.setTextColor(i == 0 ? SSD1306_BLACK : SSD1306_WHITE);
-    const bool late = task.due && task.due < now;
-    display.setCursor(1, y);
-    display.print(late ? '!' : task.doing ? '>' : '-');
-    display.setCursor(9, y);
-    String due = task.due ? (late ? String("late") : dayLabel(task.due, now)) : String("");
-    display.print(fit(task.title, due.length() ? 15 : 19));
-    if (due.length()) { display.setCursor(W - due.length() * 6 - 1, y); display.print(due); }
-    display.setTextColor(SSD1306_WHITE);
+  if (view.taskCount == 0) { label("tasks"); centered("all clear", 28, 2); return; }
+  const Task& task = view.tasks[0];
+  const bool late = task.due && task.due < now;
+  label(late ? "late" : task.doing ? "doing" : "task");
+  if (task.due) {
+    const String due = dayLabel(task.due, now) + " " + clockText(task.due);
+    display.setCursor(W - due.length() * 6, 0);
+    display.print(due);
   }
-  if (view.taskCount > 4) { display.setCursor(W - 24, 56); display.printf("+%d", view.taskCount - 4); }
+  // Two lines of 10 big characters.
+  String t(task.title);
+  display.setTextSize(2);
+  display.setCursor(0, 14);
+  display.print(t.substring(0, 10));
+  if (t.length() > 10) { display.setCursor(0, 32); display.print(fit(t.substring(10).c_str(), 10)); }
+  display.setTextSize(1);
+  if (view.taskCount > 1) {
+    display.setCursor(0, 52);
+    display.print("then " + fit(view.tasks[1].title, 14));
+    if (view.taskCount > 2) { display.setCursor(W - 18, 52); display.printf("+%d", view.taskCount - 2); }
+  }
 }
 
 void drawDone() {
-  display.drawCircle(18, 32, 14, SSD1306_WHITE);
-  display.drawCircle(18, 32, 13, SSD1306_WHITE);
+  display.drawCircle(16, 20, 13, SSD1306_WHITE);
+  display.drawCircle(16, 20, 12, SSD1306_WHITE);
   for (int d = 0; d < 2; d++) {
-    display.drawLine(11, 32 + d, 16, 38 + d, SSD1306_WHITE);
-    display.drawLine(16, 38 + d, 26, 25 + d, SSD1306_WHITE);
+    display.drawLine(9, 20 + d, 14, 26 + d, SSD1306_WHITE);
+    display.drawLine(14, 26 + d, 24, 13 + d, SSD1306_WHITE);
   }
+  display.setTextSize(2);
+  display.setCursor(36, 12);
+  display.print("Done");
+  String t(doneTitle);
   display.setTextSize(1);
-  display.setCursor(40, 14);
-  display.print("COMPLETED");
-  display.drawFastHLine(40, 24, 54, SSD1306_WHITE);
-  String title(doneTitle);
-  for (int line = 0; line < 3 && title.length(); line++) {
-    display.setCursor(40, 30 + line * 10);
-    display.print(title.substring(0, 14));
-    title = title.length() > 14 ? title.substring(14) : "";
-  }
+  display.setCursor(0, 42);
+  display.print(t.substring(0, 21));
+  if (t.length() > 21) { display.setCursor(0, 52); display.print(fit(t.substring(21).c_str(), 21)); }
 }
 
 void drawRinging() {
-  centered("ALARM", 6, 2);
-  centered(fit(ringTitle, 21).c_str(), 32, 1);
-  centered("tap to stop", 52, 1);
+  centered("ALARM", 4, 3);
+  centered(fit(ringTitle, 10).c_str(), 32, 2);
+  centered("tap to stop", 54, 1);
 }
 
 void drawSetup() {
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.print("SETUP");
-  display.drawFastHLine(0, 10, W, SSD1306_WHITE);
+  display.print("setup");
   if (portalAPOpen()) {
     display.setCursor(0, 14); display.print("Join Wi-Fi:");
     display.setCursor(0, 24); display.print(" " + portalAPName());
@@ -993,14 +976,16 @@ void loop() {
   else if (doneShowing) drawDone();
   else if (showingSetup || needsSetup) drawSetup();
   else if (!clockReady()) { centered("VOX", 14, 3); centered(view.status, 48, 1); }
-  else switch (page) {
-    case SCR_FACE: drawFace(ms, now); break;
-    case SCR_CLOCK: drawClock(now); break;
-    case SCR_TODAY: drawDay("TODAY", midnightOf(now), now); break;
-    case SCR_TOMORROW: drawDay("TOMORROW", midnightOf(now, 1), now); break;
-    case SCR_UPCOMING: drawUpcoming(now); break;
-    case SCR_TASKS: drawTasks(now); break;
-    default: break;
+  else {
+    switch (page) {
+      case SCR_HOME: drawHome(ms, now); break;
+      case SCR_CLOCK: drawClock(now); break;
+      case SCR_TODAY: drawDay("today", midnightOf(now), now); break;
+      case SCR_TOMORROW: drawDay("tomorrow", midnightOf(now, 1), now); break;
+      case SCR_TASKS: drawTasks(now); break;
+      default: break;
+    }
+    if (page != SCR_HOME) pageDots();
   }
   if (down && !setupFired) drawHoldBar(heldFor);
   display.invertDisplay(ringing && (ms / 500) % 2);
